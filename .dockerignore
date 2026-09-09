@@ -1,0 +1,11 @@
+**
+!runner/
+!runner/javascript/
+!runner/javascript/**
+!runner/python/
+!runner/python/**
+!tests/
+!tests/runner/
+!tests/runner/python/
+!tests/runner/python/verify_catalog.py
+!tests/runner/python/verify_solution_methods.py

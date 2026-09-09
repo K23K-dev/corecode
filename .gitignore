@@ -1,0 +1,21 @@
+# Dependencies and generated files
+node_modules/
+dist/
+build/
+.next/
+.venv/
+__pycache__/
+*.pyc
+playwright-report/
+test-results/
+*.log
+
+# Private configuration, database, and source snapshots
+.env
+.env.*
+!.env.example
+.local/
+AGENTS.md
+
+# Local documentation
+/docs/

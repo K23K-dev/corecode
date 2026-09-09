@@ -1,0 +1,892 @@
+/* Final gray IDE presentation. Keep this stylesheet after the shared foundation
+   and scoped library styles so its component and responsive rules retain priority. */
+
+/* Global palette and native controls. */
+body {
+  font-size: 15px;
+}
+::selection {
+  background: #4a4a4a;
+  color: #fff;
+}
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #555;
+  border-radius: 0;
+}
+button:focus-visible,
+a:focus-visible,
+summary:focus-visible {
+  outline-color: var(--accent);
+}
+input,
+select,
+textarea {
+  background: #222;
+  border-color: #4a4a4a;
+}
+
+/* Application shell, top bar, and navigation. */
+.app {
+  min-height: 0;
+}
+.app.ide-view {
+  height: 100dvh;
+  overflow: hidden;
+}
+.app.library-view {
+  height: auto;
+  min-height: 100dvh;
+  overflow: visible;
+}
+.topbar {
+  height: 36px;
+  min-height: 36px;
+  padding: 0 17px;
+  border-bottom: 0;
+  gap: 14px;
+}
+.brand {
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.2px;
+  gap: 8px;
+}
+.brand-icon {
+  color: var(--text);
+  width: 22px;
+  height: 26px;
+}
+.brand-light {
+  color: var(--text);
+}
+.brand small {
+  color: var(--muted);
+  border-color: #4a4a4a;
+}
+.topbar-center {
+  font-size: 12px;
+}
+.topbar-actions {
+  gap: 5px;
+  align-items: center;
+}
+.topbar .button {
+  min-height: 28px;
+  padding: 4px 9px;
+  font-size: 12px;
+}
+.button {
+  min-height: 32px;
+  font-size: 13px;
+  font-weight: 600;
+  border-radius: 4px;
+  padding: 6px 14px;
+}
+.button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.button.primary:hover:not(:disabled) {
+  background: #12d393;
+  border-color: #12d393;
+}
+.button.secondary {
+  background: #3a3a3a;
+  border-color: #3a3a3a;
+}
+.button.secondary:hover:not(:disabled) {
+  background: #484848;
+  border-color: #484848;
+}
+.button.quiet {
+  color: var(--muted);
+}
+.button.quiet:hover:not(:disabled),
+.icon-button:hover:not(:disabled) {
+  color: var(--text);
+  background: #343434;
+}
+.button.stop {
+  background: #442929;
+  border-color: #8c4e4e;
+  color: #ffc0c0;
+}
+.icon-button {
+  color: var(--muted);
+}
+.ide-navigation {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.ide-view .ide-navigation {
+  margin-right: auto;
+  border-left: 1px solid var(--border);
+  padding-left: 12px;
+}
+.ide-navigation > .button {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 400;
+}
+.exercise-navigation {
+  gap: 8px;
+}
+.exercise-navigation span {
+  font: 12px var(--body-font);
+  margin-right: 5px;
+}
+.workspace-progress {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--muted);
+  font-size: 12px;
+  white-space: nowrap;
+}
+/* IDE split panels and question tabs. */
+.ide-view .app-body {
+  min-height: 0;
+  padding: 6px 10px 10px;
+  overflow: hidden;
+}
+.ide-view .main-workspace {
+  min-height: 0;
+  overflow: hidden;
+}
+.ide-view .exercise-rail,
+.ide-view .workspace-bar {
+  display: none;
+}
+.ide-view .workspace-grid {
+  grid-template-columns: minmax(0, 44fr) minmax(0, 56fr);
+  gap: 8px;
+  min-height: 0;
+}
+.ide-view .problem-panel,
+.ide-view .coding-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  min-height: 0;
+  overflow: hidden;
+}
+.question-tabs {
+  display: flex;
+  align-items: stretch;
+  flex-shrink: 0;
+  min-height: 40px;
+  padding: 0 12px;
+  gap: 15px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+.question-tabs > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  position: relative;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  min-height: 40px;
+  flex-shrink: 0;
+  padding: 0 3px;
+  border-radius: 0;
+  border-bottom: 1px solid transparent;
+  white-space: nowrap;
+}
+.question-tabs > button + button::before {
+  content: '';
+  position: absolute;
+  left: -9px;
+  height: 16px;
+  width: 1px;
+  background: var(--border);
+}
+.question-tabs > button.active,
+.question-tabs > button[aria-selected='true'] {
+  color: var(--text);
+  border-bottom-color: #b6b6b6;
+  font-weight: 600;
+}
+.question-tabs > button:hover {
+  color: var(--text);
+}
+.question-tabs small {
+  font-size: 11px;
+  color: var(--muted);
+}
+/* Problem statement, examples, and reference solutions. */
+.ide-view .problem-content {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 26px 24px 30px;
+}
+.problem-content h1 {
+  font-family: var(--body-font);
+  font-size: 23px;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: -0.35px;
+  margin-bottom: 14px;
+}
+.problem-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+.problem-title-row .solved-label {
+  flex-shrink: 0;
+  margin-top: 4px;
+}
+.problem-meta {
+  gap: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 21px;
+}
+.problem-meta > span:not(.difficulty):not(.solved-label) {
+  border: 1px solid #555;
+  border-radius: 16px;
+  padding: 4px 10px;
+  font-size: 11px;
+}
+.difficulty {
+  font-size: 11px;
+  font-weight: 650;
+  line-height: 1.6;
+  border-radius: 16px;
+  padding: 4px 10px;
+}
+.difficulty-easy {
+  background: #293d34;
+  color: #27ce97;
+}
+.difficulty-medium {
+  background: #403926;
+  color: #e0bf64;
+}
+.difficulty-hard {
+  background: #422e2e;
+  color: #f09090;
+}
+.problem-prompt {
+  color: var(--text);
+  font-size: 15px;
+  line-height: 1.8;
+}
+.problem-content h2 {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: 0;
+  margin-bottom: 18px;
+}
+.requirements {
+  margin-top: 26px;
+}
+.requirements ul {
+  color: #e2e2e2;
+  font-size: 14px;
+  line-height: 1.8;
+  padding-left: 21px;
+}
+.requirements li {
+  margin-bottom: 8px;
+  padding-left: 3px;
+}
+.requirements li::marker {
+  color: #d1d1d1;
+}
+.example {
+  margin-top: 26px;
+}
+.example-code {
+  display: flex;
+  flex-direction: column;
+  gap: 26px;
+  border: 1px solid #303030;
+  background: #212121;
+  border-radius: 10px;
+  padding: 17px 16px;
+}
+.example-code > div {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.example-code > div > span {
+  color: #42d9c8;
+  font: 14px/1.7 var(--code-font);
+  margin: 0;
+  flex-shrink: 0;
+}
+.example-code pre {
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.7;
+}
+.example-code pre + span {
+  margin-top: 0;
+}
+.environment-note {
+  border-color: var(--border);
+  margin-top: 28px;
+  padding-top: 20px;
+}
+.environment-note p {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.8;
+}
+.environment-note > span {
+  color: #999;
+  font-size: 11px;
+}
+.reference-section {
+  border-color: var(--border);
+}
+.reference-toggle {
+  color: var(--muted);
+  font-size: 13px;
+}
+.reference-code {
+  margin-top: 16px;
+}
+.reference-code > p {
+  font-size: 15px;
+  line-height: 1.8;
+}
+.reference-code .cm-editor {
+  font-size: var(--editor-font-size);
+  border-color: var(--border);
+  background: #252525;
+}
+.reference-code .solution-alternative h2 {
+  font-size: 20px;
+}
+.reference-code .solution-alternative p {
+  font-size: 15px;
+  line-height: 1.8;
+}
+.problem-footer {
+  color: #999;
+  border-color: var(--border);
+  font-size: 10px;
+}
+/* Editor header and run/submit controls. */
+.editor-header {
+  height: 37px;
+  min-height: 37px;
+  padding: 0 12px 0 21px;
+  border-bottom: 1px solid var(--border);
+}
+.editor-header > div {
+  color: var(--text);
+  gap: 7px;
+  font-size: 13px;
+}
+.editor-header strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+.editor-header span {
+  color: var(--muted);
+  border-left: 0;
+  margin-left: 16px;
+  padding-left: 0;
+  font-size: 12px;
+}
+.editor-header .local-indicator {
+  margin-left: 9px;
+  width: 5px;
+  height: 5px;
+  padding: 0;
+}
+.reset-button {
+  min-height: 26px;
+  padding: 3px 7px;
+  font-size: 13px;
+}
+.ide-view .editor-area {
+  flex: 1 1 0;
+  min-height: 80px;
+  overflow: hidden;
+}
+.editor-area .cm-editor:focus-within {
+  box-shadow: none;
+}
+.ide-view .action-bar {
+  flex-shrink: 0;
+  margin-top: auto;
+  min-height: 50px;
+  padding: 7px 16px 8px 22px;
+  border-top: 1px solid var(--border);
+  gap: 10px;
+}
+.action-bar > div {
+  align-items: center;
+  gap: 15px;
+}
+.action-bar .button {
+  min-height: 33px;
+  padding: 6px 17px;
+  font-size: 14px;
+}
+.console-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 9px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+}
+.console-toggle:hover {
+  color: #fff;
+  background: #303030;
+  border-radius: 4px;
+}
+.ide-view .workspace-footer {
+  display: none;
+}
+/* Results, custom inputs, and saved submissions. */
+.ide-view .result-panel {
+  flex: 0 1 42%;
+  min-height: 205px;
+  max-height: 48%;
+  background: #252525;
+  border-color: var(--border);
+  overflow: hidden;
+}
+.result-tabs {
+  min-height: 38px;
+  gap: 22px;
+  padding: 0 22px;
+  border-color: var(--border);
+  flex-shrink: 0;
+}
+.result-tabs > button {
+  color: var(--muted);
+  font-size: 14px;
+}
+.result-tabs > button.active {
+  color: var(--text);
+  border-bottom-color: #aaa;
+}
+.result-tabs small {
+  color: #d5d5d5;
+  background: #3a3a3a;
+}
+.result-content {
+  padding: 18px 22px 22px;
+}
+.empty-state {
+  color: #999;
+  min-height: 150px;
+}
+.empty-state h3 {
+  color: #ddd;
+  font-size: 14px;
+}
+.empty-state p {
+  color: var(--muted);
+  font-size: 14px;
+}
+.result-heading > strong {
+  font-size: 18px;
+  font-weight: 500;
+}
+.result-heading > span {
+  color: #ddd;
+  font-size: 14px;
+  margin-left: auto;
+  padding-left: 0;
+}
+.case-tabs {
+  gap: 9px;
+}
+.case-tabs > button {
+  background: transparent;
+  color: #eee;
+  font-size: 14px;
+  gap: 7px;
+  padding: 6px 10px;
+}
+.case-tabs > button.active {
+  border-color: transparent;
+  background: #383838;
+}
+.case-tabs > button:hover {
+  background: #333;
+}
+.case-tabs > button.pass > svg {
+  color: #54c986;
+}
+.case-tabs > button.fail > svg {
+  color: #f16c78;
+}
+.value-block > span {
+  color: #eee;
+  font: 14px/1.5 var(--code-font);
+}
+.value-block pre {
+  color: #eee;
+  background: #202020;
+  font: var(--editor-font-size)/var(--editor-line-height) var(--code-font);
+}
+.correct-output pre,
+.expected-output pre {
+  border-left-color: #4aad68;
+}
+.wrong-output pre {
+  border-left-color: #e16470;
+}
+.stdout summary {
+  color: #bbb;
+  font-size: 14px;
+}
+.stdout pre {
+  color: #ddd;
+  font-size: 14px;
+}
+.execution-error pre {
+  color: #ffc0c0;
+}
+.custom-input {
+  padding: 18px 22px;
+}
+.custom-input label {
+  color: #e0e0e0;
+  font-size: 13px;
+}
+.custom-input p {
+  color: var(--muted);
+  font-size: 14px;
+}
+.custom-input textarea {
+  background: #202020;
+  border-color: #505050;
+}
+.custom-input-footer > code {
+  color: #bbb;
+  font-size: 11px;
+}
+.submission-list {
+  padding: 0;
+}
+.submission-row {
+  border-color: var(--border);
+  padding: 16px 6px;
+  gap: 12px;
+  font-size: 12px;
+}
+.submission-row:hover {
+  background: #303030;
+}
+.submission-row > span:first-child {
+  font-size: 13px;
+}
+.submission-row > span:nth-child(2),
+.submission-row time {
+  color: var(--muted);
+  font-size: 11px;
+}
+.notice,
+.ungraded-notice {
+  background: #393329;
+  color: #e6c99a;
+  font-size: 14px;
+}
+.warning-banner {
+  background: #403526;
+  color: #efcf9b;
+  font-size: 14px;
+}
+.stale-result {
+  background: #3a3428;
+  font-size: 14px;
+}
+
+/* Existing library, backup and saved-submission dialogs share the gray palette. */
+.modal {
+  background: #252525;
+  border-color: #505050;
+  box-shadow: 0 24px 80px #0009;
+}
+.modal::backdrop {
+  background: #0009;
+}
+.modal-description,
+.modal-description strong {
+  color: #c4c4c4;
+}
+.search-field {
+  background: #252525;
+  border-color: #494949;
+}
+.search-field input {
+  font-size: 13px;
+}
+.library-filters select {
+  background: #2c2c2c;
+  border-color: #4a4a4a;
+  font-size: 12px;
+}
+.library-count {
+  color: #d0d0d0;
+}
+.library-count span,
+.library-title small,
+.availability {
+  color: #aaa;
+}
+.library-list,
+.library-row {
+  border-color: var(--border);
+}
+.library-row:hover {
+  background: #333;
+}
+.library-state {
+  color: #aaa;
+}
+.library-state.solved,
+.availability.ready {
+  color: #40c697;
+}
+.local-progress-hero > svg {
+  color: var(--accent);
+}
+.local-progress-hero p,
+.storage-explanation {
+  color: #bdbdbd;
+}
+.progress-totals {
+  border-color: #444;
+}
+.progress-totals dt,
+.progress-totals dd small {
+  color: #aaa;
+}
+.progress-totals dd {
+  color: #eee;
+}
+.storage-footer {
+  color: #aaa;
+  border-color: #444;
+}
+.restore-confirm {
+  background: #2e2e2e;
+  border-color: #4a4a4a;
+}
+.restore-confirm p {
+  color: #c4c4c4;
+}
+.attempt-code {
+  border-color: #4a4a4a;
+}
+
+/* Compact and mobile IDE layouts. */
+@media (max-width: 980px) {
+  .workspace-progress {
+    font-size: 11px;
+  }
+  .question-tabs {
+    gap: 13px;
+    padding: 0 10px;
+  }
+  .question-tabs > button {
+    gap: 5px;
+  }
+  .ide-view .problem-content {
+    padding: 24px 20px;
+  }
+}
+@media (max-width: 700px) {
+  .app.ide-view {
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .topbar {
+    min-height: 36px;
+    height: 36px;
+    padding: 0 9px;
+    gap: 7px;
+  }
+  .topbar .brand {
+    font-size: 13px;
+  }
+  .ide-view .brand > span {
+    display: none;
+  }
+  .topbar-actions {
+    gap: 2px;
+  }
+  .topbar .button {
+    padding: 4px 6px;
+  }
+  .ide-navigation {
+    gap: 4px;
+  }
+  .ide-view .ide-navigation {
+    padding-left: 7px;
+  }
+  .ide-navigation > .button {
+    font-size: 12px;
+  }
+  .exercise-navigation {
+    gap: 0;
+  }
+  .exercise-navigation span {
+    font-size: 10px;
+    margin-right: 2px;
+  }
+  .workspace-progress {
+    display: none;
+  }
+  .ide-view .app-body {
+    display: flex;
+    overflow: hidden;
+    padding: 4px 6px 6px;
+  }
+  .ide-view .main-workspace {
+    display: flex;
+    overflow: hidden;
+  }
+  .ide-view .mobile-pane-tabs {
+    display: flex;
+    flex-shrink: 0;
+    background: var(--base);
+    border-color: var(--border);
+    padding: 0 10px;
+    gap: 25px;
+    margin-bottom: 6px;
+  }
+  .mobile-pane-tabs > button {
+    padding: 9px 0;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .mobile-pane-tabs > button.active {
+    color: var(--text);
+    border-bottom-color: var(--accent);
+  }
+  .ide-view .workspace-grid {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+    min-height: 0;
+  }
+  .ide-view .problem-panel,
+  .ide-view .coding-panel {
+    flex: 1;
+    height: 100%;
+    min-height: 0;
+    border-radius: 9px;
+  }
+  .ide-view .mobile-problem .coding-panel,
+  .ide-view .mobile-code .problem-panel {
+    display: none;
+  }
+  .question-tabs {
+    gap: 8px;
+    padding: 0 8px;
+  }
+  .question-tabs > button {
+    gap: 4px;
+    padding: 0 2px;
+  }
+  .question-tabs > button + button::before {
+    left: -5px;
+  }
+  .ide-view .problem-content {
+    padding: 23px 18px;
+  }
+  .problem-content h1 {
+    font-size: 23px;
+  }
+  .problem-prompt {
+    font-size: 15px;
+  }
+  .requirements ul {
+    font-size: 13px;
+  }
+  .problem-content h2 {
+    font-size: 14px;
+  }
+  .example-code {
+    padding: 14px 12px;
+    gap: 18px;
+  }
+  .example-code > div {
+    gap: 7px;
+  }
+  .example-code > div > span,
+  .example-code pre {
+    font-size: 13px;
+  }
+  .editor-header {
+    padding: 0 10px 0 15px;
+  }
+  .editor-header span {
+    display: inline;
+    margin-left: 10px;
+  }
+  .ide-view .editor-area {
+    min-height: 80px;
+  }
+  .ide-view .action-bar {
+    min-height: 49px;
+    padding: 7px 10px;
+    gap: 4px;
+  }
+  .action-bar > div {
+    gap: 7px;
+  }
+  .action-bar .button {
+    min-height: 32px;
+    font-size: 12px;
+    padding: 6px 12px;
+    gap: 5px;
+  }
+  .console-toggle {
+    font-size: 12px;
+    padding: 6px 4px;
+  }
+  .ide-view .result-panel {
+    min-height: 185px;
+    max-height: 48%;
+  }
+  .result-tabs {
+    min-height: 36px;
+    padding: 0 16px;
+  }
+  .result-content,
+  .custom-input {
+    padding: 16px;
+  }
+  .submission-row {
+    gap: 7px;
+  }
+  .submission-row > span:first-child {
+    font-size: 12px;
+  }
+  .submission-row time {
+    font-size: 10px;
+  }
+}
