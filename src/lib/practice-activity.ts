@@ -1,4 +1,73 @@
+import { isDateKey, practiceClock, summarizeActivity } from '../../shared/practice-activity.mjs';
+
 export type ActivityDay = { date: string; count: number };
+
+export type ActivitySnapshot = {
+  timeZone: 'America/New_York';
+  resetHour: 20;
+  today: string;
+  resetAt: string;
+  serverNow: string;
+  days: ActivityDay[];
+  repairs: string[];
+  streak: ReturnType<typeof summarizeActivity>;
+};
+
+/** Keep unavailable or malformed history out of the calendar and repair controls. */
+export function parseActivity(value: unknown): ActivitySnapshot {
+  const invalid = () => new Error('Activity could not be loaded.');
+  if (!value || typeof value !== 'object') throw invalid();
+  const activity = value as ActivitySnapshot;
+  if (
+    activity.timeZone !== 'America/New_York' ||
+    activity.resetHour !== 20 ||
+    typeof activity.serverNow !== 'string' ||
+    !Number.isFinite(Date.parse(activity.serverNow)) ||
+    !Array.isArray(activity.days) ||
+    activity.days.length > 100_000 ||
+    activity.days.some(
+      (day) => !day || !isDateKey(day.date) || !Number.isSafeInteger(day.count) || day.count < 1,
+    ) ||
+    !Array.isArray(activity.repairs) ||
+    activity.repairs.length > 100_000 ||
+    activity.repairs.some((day) => !isDateKey(day)) ||
+    !activity.streak
+  )
+    throw invalid();
+  const clock = practiceClock(new Date(activity.serverNow));
+  if (clock.today !== activity.today || clock.resetAt !== activity.resetAt) throw invalid();
+  const expected = summarizeActivity(activity.days, activity.repairs, activity.today);
+  for (const key of Object.keys(expected) as (keyof typeof expected)[]) {
+    if (activity.streak[key] !== expected[key]) throw invalid();
+  }
+  return activity;
+}
+
+export async function loadActivity(signal: AbortSignal): Promise<ActivitySnapshot> {
+  const response = await fetch('/api/activity', { cache: 'no-store', signal });
+  if (!response.ok) throw new Error('Activity could not be loaded.');
+  return parseActivity(await response.json());
+}
+
+export async function repairActivity(date: string, signal: AbortSignal): Promise<ActivitySnapshot> {
+  const response = await fetch('/api/activity/repairs', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'X-Code-Practice-Client': '1' },
+    body: JSON.stringify({ date }),
+    signal,
+  });
+  if (!response.ok) {
+    if (response.status === 409) {
+      throw new Error(
+        'Your activity changed. Refresh activity, then check your hearts and this day.',
+      );
+    }
+    throw new Error(
+      'Repair could not be confirmed. Retry; a saved repair will not cost another heart.',
+    );
+  }
+  return parseActivity(await response.json());
+}
 
 export type ActivityCalendarCell = {
   date: string | null;

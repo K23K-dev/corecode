@@ -562,7 +562,22 @@
 .practice-library .pl-problem-status {
   display: inline-flex;
   align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
   color: #858585;
+}
+.practice-library .pl-problem-status:hover {
+  background: #343d38;
+  color: #b1d4c4;
+}
+.practice-library .pl-problem-status:focus-visible {
+  outline: 2px solid var(--pl-green);
+  outline-offset: 2px;
 }
 .practice-library .pl-problem-status.is-solved {
   color: var(--pl-green);

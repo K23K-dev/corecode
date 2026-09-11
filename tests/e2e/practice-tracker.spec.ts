@@ -1,12 +1,15 @@
 import type { Page } from '@playwright/test';
 import { expect, test, type TestCatalog } from './fixtures';
 import type { ProgressData } from '../../src/lib/progress';
+import type { ActivityDay, ActivitySnapshot } from '../../src/lib/practice-activity';
+import { practiceClock, summarizeActivity } from '../../shared/practice-activity.mjs';
 
 const timeZone = 'America/New_York';
-// September 8 in UTC is still September 7 for this browser.
-const fixedTime = '2026-09-08T02:30:00.000Z';
+// Midday Eastern, safely inside the September 7 practice day.
+const fixedTime = '2026-09-07T16:30:00.000Z';
 const today = '2026-09-07';
-const activityPath = '**/api/activity?*';
+const activityPath = /\/api\/activity(?:\?.*)?$/;
+const repairsPath = '**/api/activity/repairs';
 const difficulties = ['Easy', 'Medium', 'Hard'] as const;
 let authored: TestCatalog['exercises'];
 
@@ -16,9 +19,40 @@ test.beforeEach(async ({ page, catalog }) => {
   await page.clock.setFixedTime(fixedTime);
 });
 
-async function mockActivity(page: Page, days: { date: string; count: number }[]) {
-  await page.route(activityPath, (route) => route.fulfill({ json: { timeZone, days } }));
+function activitySnapshot(
+  days: ActivityDay[],
+  repairs: string[] = [],
+  serverNow = fixedTime,
+): ActivitySnapshot {
+  const clock = practiceClock(new Date(serverNow));
+  return {
+    timeZone,
+    resetHour: 20,
+    ...clock,
+    serverNow,
+    days,
+    repairs,
+    streak: summarizeActivity(days, repairs, clock.today),
+  };
 }
+
+async function mockActivity(page: Page, days: ActivityDay[]) {
+  await page.route(activityPath, (route) => route.fulfill({ json: activitySnapshot(days) }));
+}
+
+function deferred() {
+  let resolve!: () => void;
+  const promise = new Promise<void>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
+}
+
+const repairableDays: ActivityDay[] = [
+  ...[1, 2, 3, 4, 5].map((day) => ({ date: `2026-09-0${day}`, count: 1 })),
+  { date: today, count: 2 },
+];
+const missedDate = '2026-09-06';
 
 test('tracker uses all catalog difficulty totals and saved solved state, independent of filters', async ({
   page,
@@ -44,6 +78,8 @@ test('tracker uses all catalog difficulty totals and saved solved state, indepen
   await page.goto('/#library');
   const tracker = page.getByRole('complementary', { name: 'Practice tracker' });
   await expect(tracker).toBeVisible();
+  await expect(tracker.getByText('Five solved days in a streak earn one heart.')).toHaveCount(0);
+  await expect(tracker.locator('[aria-label="Calendar legend"]')).toHaveCount(0);
 
   async function expectTotals() {
     for (const difficulty of difficulties) {
@@ -68,7 +104,7 @@ test('tracker uses all catalog difficulty totals and saved solved state, indepen
   await expect(tracker.getByTestId('best-streak')).toHaveText('0 days');
 });
 
-test('calendar uses the local day, navigates months, and distinguishes current from best streak', async ({
+test('calendar uses the Eastern practice day, navigates months, and distinguishes current from best streak', async ({
   page,
 }) => {
   const days = [
@@ -76,17 +112,24 @@ test('calendar uses the local day, navigates months, and distinguishes current f
     { date: '2026-09-05', count: 1 },
     { date: '2026-09-06', count: 3 },
   ];
-  const requestedZones: string[] = [];
+  const requestedQueries: string[] = [];
   await page.route(activityPath, (route) => {
-    requestedZones.push(new URL(route.request().url()).searchParams.get('timeZone') ?? '');
-    return route.fulfill({ json: { timeZone, days } });
+    requestedQueries.push(new URL(route.request().url()).search);
+    return route.fulfill({ json: activitySnapshot(days) });
   });
   await page.goto('/#library');
   const tracker = page.getByRole('complementary', { name: 'Practice tracker' });
   await expect(tracker.getByTestId('current-streak')).toHaveText('2 days');
   await expect(tracker.getByTestId('best-streak')).toHaveText('5 days');
-  expect(requestedZones.length).toBeGreaterThan(0);
-  expect(requestedZones.every((zone) => zone === timeZone)).toBe(true);
+  expect(requestedQueries.length).toBeGreaterThan(0);
+  expect(requestedQueries.every((query) => query === '')).toBe(true);
+  await expect(tracker.getByTestId('tracker-day')).toHaveText('Day 7');
+  // The synchronized clock continues ticking while the other assertions run.
+  await expect(tracker.getByTestId('tracker-reset-countdown')).toHaveText(
+    /^07:(?:30:00|29:\d{2}) left$/,
+  );
+  await expect(tracker.getByTestId('tracker-hearts')).toHaveText('1');
+  await expect(tracker.getByTestId('tracker-heart-progress')).toHaveText('2/5 to next');
 
   const september = tracker.getByRole('table', { name: 'September 2026', exact: true });
   const todayButton = september.getByRole('button', {
@@ -127,6 +170,267 @@ test('calendar uses the local day, navigates months, and distinguishes current f
   await expect(tracker.getByTestId('best-streak')).toHaveText('5 days');
 });
 
+for (const boundary of [
+  { before: '2026-09-07T23:59:58.000Z', after: '2026-09-08T00:00:00.000Z' },
+  // The fall DST transition has ended: 8 PM Eastern is now 01:00 UTC, not 00:00.
+  { before: '2026-11-02T00:59:58.000Z', after: '2026-11-02T01:00:00.000Z' },
+]) {
+  test(`tracker rolls over at 20:00 Eastern from ${boundary.before}`, async ({ page }) => {
+    await page.clock.pauseAt(new Date(boundary.before));
+    await page.clock.setSystemTime(new Date(boundary.before));
+    let serverNow = boundary.before;
+    let requests = 0;
+    const previousDay = practiceClock(new Date(boundary.before)).today;
+    const nextDay = practiceClock(new Date(boundary.after)).today;
+    await page.route(activityPath, (route) => {
+      requests++;
+      return route.fulfill({ json: activitySnapshot([], [], serverNow) });
+    });
+    await page.goto('/#library');
+    const tracker = page.getByRole('complementary', { name: 'Practice tracker' });
+    await expect(tracker.getByTestId('tracker-reset-countdown')).toHaveText('00:00:02 left');
+    await expect(tracker.getByTestId('tracker-day')).toHaveText(
+      `Day ${Number(previousDay.slice(-2))}`,
+    );
+    await expect(tracker.locator(`[data-date="${previousDay}"]`)).toHaveAttribute(
+      'aria-current',
+      'date',
+    );
+    await expect(tracker.getByTestId('tracker-reset-countdown')).toHaveAttribute(
+      'title',
+      'Day resets at 8 PM Eastern time',
+    );
+    const beforeRollover = requests;
+    await page.clock.runFor(1_000);
+    await expect(tracker.getByTestId('tracker-reset-countdown')).toHaveText('00:00:01 left');
+    serverNow = boundary.after;
+    await page.clock.runFor(1_000);
+    await expect.poll(() => requests).toBeGreaterThan(beforeRollover);
+    await expect(tracker.getByTestId('tracker-day')).toHaveText(`Day ${Number(nextDay.slice(-2))}`);
+    await expect(tracker.locator(`[data-date="${nextDay}"]`)).toHaveAttribute(
+      'aria-current',
+      'date',
+    );
+    await expect(tracker.getByTestId('tracker-reset-countdown')).toHaveText('24:00:00 left');
+  });
+}
+
+test('repair confirmation spends one heart, preserves accepted counts, and survives reload', async ({
+  page,
+}) => {
+  let repairs: string[] = [];
+  const posts: { date: string }[] = [];
+  let stateWrites = 0;
+  page.on('request', (request) => {
+    if (new URL(request.url()).pathname === '/api/state' && request.method() === 'PUT')
+      stateWrites++;
+  });
+  await page.route(activityPath, (route) =>
+    route.fulfill({ json: activitySnapshot(repairableDays, repairs) }),
+  );
+  await page.route(repairsPath, (route) => {
+    expect(route.request().method()).toBe('POST');
+    expect(route.request().headers()['x-code-practice-client']).toBe('1');
+    posts.push(route.request().postDataJSON());
+    repairs = [missedDate];
+    return route.fulfill({ json: activitySnapshot(repairableDays, repairs) });
+  });
+  await page.goto('/#library');
+  const tracker = page.getByRole('complementary', { name: 'Practice tracker' });
+  const missed = tracker.locator(`[data-date="${missedDate}"]`);
+  await expect(missed).toHaveClass(/is-missed-day/);
+  await expect(missed).toHaveAccessibleName('September 6, 2026: missed day');
+  await expect(tracker.getByTestId('tracker-hearts')).toHaveText('1');
+  await expect(tracker.getByTestId('tracker-heart-progress')).toHaveText('1/5 to next');
+  await missed.click();
+  const dialog = page.getByRole('dialog', { name: 'Repair streak', exact: true });
+  await expect(dialog).toBeVisible();
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  expect(posts).toEqual([]);
+  await expect(missed).toHaveClass(/is-missed-day/);
+  await missed.click();
+  await dialog.getByRole('button', { name: 'Use 1 heart', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  expect(posts).toEqual([{ date: missedDate }]);
+  await expect(missed).toHaveAccessibleName('September 6, 2026: repaired day');
+  await expect(missed).toHaveClass(/is-repaired-day/);
+  await expect(missed).not.toHaveClass(/is-active-day|is-missed-day/);
+  await expect(missed).toHaveAttribute('data-count', '0');
+  await expect(tracker.getByTestId('tracker-hearts')).toHaveText('0');
+  await expect(tracker.getByTestId('current-streak')).toHaveText('7 days');
+  await expect(tracker.getByTestId('best-streak')).toHaveText('7 days');
+  await expect(tracker.locator(`[data-date="${today}"]`)).toHaveAttribute('data-count', '2');
+  await expect(
+    tracker.getByRole('img', { name: `0 of ${authored.length} problems solved`, exact: true }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(missed).toHaveAccessibleName('September 6, 2026: repaired day');
+  await expect(tracker.getByTestId('tracker-hearts')).toHaveText('0');
+  await expect(tracker.getByTestId('current-streak')).toHaveText('7 days');
+  expect(posts).toHaveLength(1);
+  expect(stateWrites).toBe(0);
+});
+
+test('only missed days since practice began offer repair and no hearts means no request', async ({
+  page,
+}) => {
+  let posts = 0;
+  await mockActivity(page, [
+    { date: '2026-09-05', count: 1 },
+    { date: today, count: 1 },
+  ]);
+  await page.route(repairsPath, (route) => {
+    posts++;
+    return route.fulfill({ status: 409, json: { error: 'No hearts available.' } });
+  });
+  await page.goto('/#library');
+  const tracker = page.getByRole('complementary', { name: 'Practice tracker' });
+  await expect(tracker.getByTestId('tracker-hearts')).toHaveText('0');
+  const beforePractice = tracker.locator('[data-date="2026-09-01"]');
+  await expect(beforePractice).not.toHaveClass(/is-missed-day/);
+  await beforePractice.click();
+  await expect(page.getByRole('dialog', { name: 'Repair streak', exact: true })).toHaveCount(0);
+  await expect(tracker.locator(`[data-date="${today}"]`)).not.toHaveClass(/is-missed-day/);
+  await expect(tracker.locator('[data-date="2026-09-08"]')).toBeDisabled();
+  await tracker.locator(`[data-date="${missedDate}"]`).click();
+  const dialog = page.getByRole('dialog', { name: 'Repair streak', exact: true });
+  await expect(dialog).toContainText(
+    'No hearts available. Solve on five days in a streak to earn one.',
+  );
+  await expect(dialog.getByRole('button', { name: 'Use 1 heart', exact: true })).toBeDisabled();
+  await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
+  expect(posts).toBe(0);
+});
+
+test('a failed repair leaves the day and heart unchanged and permits a safe retry', async ({
+  page,
+}) => {
+  let failing = true;
+  let posts = 0;
+  let repairs: string[] = [];
+  await page.route(activityPath, (route) =>
+    route.fulfill({ json: activitySnapshot(repairableDays, repairs) }),
+  );
+  await page.route(repairsPath, (route) => {
+    posts++;
+    if (failing) return route.fulfill({ status: 503, json: { error: 'Temporarily unavailable' } });
+    repairs = [missedDate];
+    return route.fulfill({ json: activitySnapshot(repairableDays, repairs) });
+  });
+  await page.goto('/#library');
+  const tracker = page.getByRole('complementary', { name: 'Practice tracker' });
+  const missed = tracker.locator(`[data-date="${missedDate}"]`);
+  await expect(tracker.getByTestId('tracker-hearts')).toHaveText('1');
+  await missed.click();
+  const dialog = page.getByRole('dialog', { name: 'Repair streak', exact: true });
+  await dialog.getByRole('button', { name: 'Use 1 heart', exact: true }).click();
+  await expect(dialog.getByRole('alert')).toContainText('Repair could not be confirmed.');
+  await expect(dialog.getByRole('button', { name: 'Use 1 heart', exact: true })).toBeEnabled();
+  await expect(tracker.getByTestId('tracker-hearts')).toHaveText('1');
+  await expect(missed).toHaveClass(/is-missed-day/);
+  await expect(tracker.getByTestId('current-streak')).toHaveText('1 day');
+  failing = false;
+  await dialog.getByRole('button', { name: 'Use 1 heart', exact: true }).click();
+  await expect(dialog).toHaveCount(0);
+  await expect(missed).toHaveClass(/is-repaired-day/);
+  await expect(tracker.getByTestId('tracker-hearts')).toHaveText('0');
+  expect(posts).toBe(2);
+});
+
+test('a lost last-heart repair response is reconciled by the next activity read without another charge', async ({
+  page,
+}) => {
+  let repairs: string[] = [];
+  let posts = 0;
+  let confirmedReads = 0;
+  await page.route(activityPath, (route) => {
+    if (repairs.includes(missedDate)) confirmedReads++;
+    return route.fulfill({ json: activitySnapshot(repairableDays, repairs) });
+  });
+  await page.route(repairsPath, (route) => {
+    posts++;
+    expect(route.request().postDataJSON()).toEqual({ date: missedDate });
+    // The write committed, but the client never received its successful response.
+    repairs = [missedDate];
+    return route.fulfill({ status: 503, json: { error: 'Response unavailable' } });
+  });
+  await page.goto('/#library');
+  const tracker = page.getByRole('complementary', { name: 'Practice tracker' });
+  await expect(tracker.getByTestId('tracker-hearts')).toHaveText('1');
+  const missed = tracker.locator(`[data-date="${missedDate}"]`);
+  await missed.click();
+  const dialog = page.getByRole('dialog', { name: 'Repair streak', exact: true });
+  await dialog.getByRole('button', { name: 'Use 1 heart', exact: true }).click();
+  await expect.poll(() => confirmedReads).toBeGreaterThan(0);
+  await expect(dialog).toHaveCount(0);
+  await expect(missed).toHaveAccessibleName('September 6, 2026: repaired day');
+  await expect(missed).toHaveClass(/is-repaired-day/);
+  await expect(missed).toHaveAttribute('data-count', '0');
+  await expect(tracker.getByTestId('tracker-hearts')).toHaveText('0');
+  await expect(tracker.getByTestId('current-streak')).toHaveText('7 days');
+  expect(posts).toBe(1);
+});
+
+test('pending repairs cannot double-submit and late activity reads cannot undo a confirmed repair', async ({
+  page,
+}) => {
+  let holdRead = false;
+  let readStarted = false;
+  let posts = 0;
+  let repairs: string[] = [];
+  const oldRead = deferred();
+  const oldReadFinished = deferred();
+  const repairResponse = deferred();
+  await page.route(activityPath, async (route) => {
+    const snapshot = activitySnapshot(repairableDays, repairs);
+    if (holdRead) {
+      holdRead = false;
+      readStarted = true;
+      await oldRead.promise;
+      // A correctly invalidated fetch may already be aborted when it is released.
+      await route.fulfill({ json: snapshot }).catch(() => {});
+      oldReadFinished.resolve();
+      return;
+    }
+    await route.fulfill({ json: snapshot });
+  });
+  await page.route(repairsPath, async (route) => {
+    posts++;
+    expect(route.request().postDataJSON()).toEqual({ date: missedDate });
+    await repairResponse.promise;
+    repairs = [missedDate];
+    await route.fulfill({ json: activitySnapshot(repairableDays, repairs) });
+  });
+  await page.goto('/#library');
+  const tracker = page.getByRole('complementary', { name: 'Practice tracker' });
+  await expect(tracker.getByTestId('tracker-hearts')).toHaveText('1');
+  holdRead = true;
+  await page.evaluate(() => window.dispatchEvent(new Event('focus')));
+  await expect.poll(() => readStarted).toBe(true);
+  await tracker.locator(`[data-date="${missedDate}"]`).click();
+  const dialog = page.getByRole('dialog', { name: 'Repair streak', exact: true });
+  try {
+    await dialog.getByRole('button', { name: 'Use 1 heart', exact: true }).dblclick();
+    await expect.poll(() => posts).toBe(1);
+    await expect(dialog.getByRole('button', { name: 'Repairing…', exact: true })).toBeDisabled();
+    repairResponse.resolve();
+    await expect(dialog).toHaveCount(0);
+    await expect(tracker.getByTestId('current-streak')).toHaveText('7 days');
+    oldRead.resolve();
+    await oldReadFinished.promise;
+    await page.evaluate(
+      () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve())),
+    );
+    await expect(tracker.getByTestId('tracker-hearts')).toHaveText('0');
+    await expect(tracker.getByTestId('current-streak')).toHaveText('7 days');
+    await expect(tracker.locator(`[data-date="${missedDate}"]`)).toHaveClass(/is-repaired-day/);
+    expect(posts).toBe(1);
+  } finally {
+    oldRead.resolve();
+    repairResponse.resolve();
+  }
+});
+
 for (const failure of ['unavailable API', 'invalid activity response']) {
   test(`tracker reports ${failure} honestly and retries successfully`, async ({ page }) => {
     let failing = true;
@@ -137,7 +441,7 @@ for (const failure of ['unavailable API', 'invalid activity response']) {
         return failure === 'unavailable API'
           ? route.fulfill({ status: 503, json: { error: 'Temporarily unavailable' } })
           : route.fulfill({ json: { days: [{ date: today, count: 'not a count' }] } });
-      return route.fulfill({ json: { timeZone, days: [{ date: today, count: 2 }] } });
+      return route.fulfill({ json: activitySnapshot([{ date: today, count: 2 }]) });
     });
     await page.goto('/#library');
     const tracker = page.getByRole('complementary', { name: 'Practice tracker' });
@@ -195,7 +499,16 @@ for (const width of [1440, 390]) {
 test('accepted activity refreshes only after the real isolated submission is acknowledged', async ({
   page,
   database,
+  request,
 }) => {
+  // This one case reads the real guarded test API. Align its submission timestamp
+  // to the server clock rather than the other tests' deliberately historical clock.
+  const initial = await request.get('/api/activity');
+  expect(initial.ok()).toBe(true);
+  const initialActivity = (await initial.json()) as ActivitySnapshot;
+  const submissionTime = initialActivity.serverNow;
+  const submissionDay = initialActivity.today;
+  await page.clock.setFixedTime(submissionTime);
   const problem = authored.find((item) => item.id === 'python-core-normalize-text-01')!;
   let activityRequests = 0;
   page.on('request', (request) => {
@@ -232,7 +545,7 @@ test('accepted activity refreshes only after the real isolated submission is ack
     await expect(page.locator('.app')).toHaveAttribute('data-save-state', 'saving');
     await page.getByRole('link', { name: 'Code Practice library', exact: true }).click();
     await expect(tracker).toBeVisible();
-    await expect(tracker.locator(`button[data-date="${today}"]`)).toHaveAttribute(
+    await expect(tracker.locator(`button[data-date="${submissionDay}"]`)).toHaveAttribute(
       'data-count',
       '0',
     );
@@ -249,7 +562,10 @@ test('accepted activity refreshes only after the real isolated submission is ack
   }
 
   await expect(page.locator('.app')).toHaveAttribute('data-save-state', 'saved');
-  await expect(tracker.locator(`button[data-date="${today}"]`)).toHaveAttribute('data-count', '1');
+  await expect(tracker.locator(`button[data-date="${submissionDay}"]`)).toHaveAttribute(
+    'data-count',
+    '1',
+  );
   await expect(tracker.getByTestId('current-streak')).toHaveText('1 day');
   await expect(tracker.getByTestId('best-streak')).toHaveText('1 day');
   await expect(
@@ -259,7 +575,7 @@ test('accepted activity refreshes only after the real isolated submission is ack
   const { rows } = await database.client.query(
     `SELECT attempt->>'status' AS status, attempt->>'at' AS at FROM ${database.schema}.cp_submissions`,
   );
-  expect(rows).toEqual([{ status: 'accepted', at: fixedTime }]);
+  expect(rows).toEqual([{ status: 'accepted', at: submissionTime }]);
 });
 
 test('same-day focus refreshes archived activity even when the latest twenty attempts are unchanged', async ({
@@ -291,7 +607,7 @@ test('same-day focus refreshes archived activity even when the latest twenty att
     [JSON.stringify(progress)],
   );
   let days = [{ date: today, count: 20 }];
-  await page.route(activityPath, (route) => route.fulfill({ json: { timeZone, days } }));
+  await page.route(activityPath, (route) => route.fulfill({ json: activitySnapshot(days) }));
   await page.goto('/#library');
   const tracker = page.getByRole('complementary', { name: 'Practice tracker' });
   await expect(tracker.getByTestId('current-streak')).toHaveText('1 day');
@@ -345,7 +661,7 @@ test('activity retry works while an unrelated draft remains offline and unacknow
   let activityAvailable = false;
   await page.route(activityPath, (route) =>
     activityAvailable
-      ? route.fulfill({ json: { timeZone, days: [{ date: today, count: 1 }] } })
+      ? route.fulfill({ json: activitySnapshot([{ date: today, count: 1 }]) })
       : route.fulfill({ status: 503, json: { error: 'Temporarily unavailable' } }),
   );
   await page.goto(`/#${problem.id}`);

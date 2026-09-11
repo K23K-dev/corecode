@@ -66,7 +66,7 @@ test('problem tables order their columns and provide sortable headers and direct
   const row = table.locator(`tr[data-problem-id="${problemId}"]`);
   const cells = row.locator('td');
   await expect(cells).toHaveCount(5);
-  await expect(cells.nth(0).getByRole('img', { name: 'Not solved', exact: true })).toBeVisible();
+  await expect(cells.nth(0).getByRole('button', { name: /^Mark .* complete$/ })).toBeVisible();
   await expect(
     cells.nth(1).getByRole('button', { name: 'Star Normalize text', exact: true }),
   ).toBeVisible();

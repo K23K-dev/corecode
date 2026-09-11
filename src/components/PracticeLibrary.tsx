@@ -36,6 +36,7 @@ const ProblemTable = memo(function ProblemTable({
   onSort,
   onSelect,
   onStar,
+  onSolved,
 }: {
   items: Exercise[];
   label: string;
@@ -45,6 +46,7 @@ const ProblemTable = memo(function ProblemTable({
   onSort: (key: 'title' | 'difficulty') => void;
   onSelect: (exercise: Exercise, tab?: 'question' | 'solution') => void;
   onStar: (id: string, value: boolean) => void;
+  onSolved: (exercise: Exercise, value: boolean) => void;
 }) {
   const stars = new Set(starred);
   const isSolved = (exercise: Exercise) => Boolean(progress.exercises[exercise.id]?.solved);
@@ -98,17 +100,23 @@ const ProblemTable = memo(function ProblemTable({
             }}
           >
             <td className="pl-status-column">
-              <span
+              <button
+                type="button"
                 className={`pl-problem-status ${isSolved(exercise) ? 'is-solved' : ''}`}
-                role="img"
-                aria-label={isSolved(exercise) ? 'Solved' : 'Not solved'}
+                aria-label={`Mark ${exercise.title} ${isSolved(exercise) ? 'incomplete' : 'complete'}`}
+                aria-pressed={isSolved(exercise)}
+                title={isSolved(exercise) ? 'Mark incomplete' : 'Mark complete'}
+                onClick={(event) => {
+                  event.stopPropagation();
+                  onSolved(exercise, !isSolved(exercise));
+                }}
               >
                 {isSolved(exercise) ? (
                   <CircleCheck size={18} aria-hidden="true" />
                 ) : (
                   <Circle size={17} aria-hidden="true" />
                 )}
-              </span>
+              </button>
             </td>
             <td className="pl-star-column">
               <button
@@ -158,6 +166,7 @@ export default function PracticeLibrary({
   catalog,
   starred,
   onStar,
+  onSolved,
   saveState = 'saved',
 }: {
   progress: ProgressData;
@@ -165,6 +174,7 @@ export default function PracticeLibrary({
   catalog: Catalog;
   starred: string[];
   onStar: (id: string, value: boolean) => void;
+  onSolved: (exercise: Exercise, value: boolean) => void;
   saveState?: string;
 }) {
   const { decks, exercises } = catalog;
@@ -280,6 +290,7 @@ export default function PracticeLibrary({
         onSort={sortColumn}
         onSelect={onSelect}
         onStar={onStar}
+        onSolved={onSolved}
       />
     );
   }

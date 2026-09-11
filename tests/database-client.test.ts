@@ -84,6 +84,7 @@ function database(initial?: Partial<StateSnapshot>) {
     if (init?.method !== 'PUT') return Response.json(clone(api.state));
     const body = JSON.parse(String(init.body)) as Write;
     api.requests.push(body);
+    expect(body.writeIds.length).toBeLessThanOrEqual(1_000);
     expect((init.headers as Record<string, string>)['X-Code-Practice-Client']).toBe('1');
     if (api.failWrites) throw new Error('Database is offline.');
     if (body.migrationId && api.state.migrations.includes(body.migrationId))
@@ -136,6 +137,19 @@ function edit(client: ProgressClient, draft: string, at = DATE) {
     exercises: {
       ...previous.exercises,
       problem: { ...record(draft, at), ...previous.exercises.problem, draft, updatedAt: at },
+    },
+  }));
+}
+function submit(client: ProgressClient, item: Attempt) {
+  client.updateProgress((previous) => ({
+    version: 1,
+    exercises: {
+      ...previous.exercises,
+      problem: {
+        ...previous.exercises.problem,
+        solved: previous.exercises.problem.solved || item.status === 'accepted',
+        attempts: [...previous.exercises.problem.attempts, item],
+      },
     },
   }));
 }
@@ -588,6 +602,379 @@ describe('durable pending work and revision merging', () => {
     await vi.advanceTimersByTimeAsync(60_000);
     expect(api.requests).toHaveLength(4);
     expect(client.getSnapshot().status).toBe('offline');
+  });
+});
+
+describe('explicit completion choices', () => {
+  it.each([true, false])(
+    'persists solved=%s without changing any draft or attempts',
+    async (value) => {
+      const original = { ...record('my exact draft\n', DATE, [attempt(1)]), solved: !value };
+      const api = database({ progress: { version: 1, exercises: { problem: original } } });
+      const client = await open(api);
+      client.setSolved('problem', value, 'unused starter');
+      const expected = { ...original, solved: value };
+      expect(client.getSnapshot().progress.exercises.problem).toEqual(expected);
+      await client.flush();
+      expect(api.state.progress.exercises.problem).toEqual(expected);
+      expect(api.requests[0].writeIds).toHaveLength(1);
+      expect(api.state.writes).toEqual(api.requests[0].writeIds);
+      expect((await open(api)).getSnapshot().progress.exercises.problem).toEqual(expected);
+    },
+  );
+
+  it.each([true, false])(
+    'uses the starter and no fabricated attempt for a new solved=%s record',
+    async (value) => {
+      const api = database();
+      const client = await open(api);
+      client.setSolved('new-problem', value, 'class Solution:\n    pass\n');
+      const expected = { ...record('class Solution:\n    pass\n'), solved: value };
+      expect(client.getSnapshot().progress.exercises['new-problem']).toEqual(expected);
+      await client.flush();
+      expect(api.state.progress.exercises['new-problem']).toEqual(expected);
+      expect(api.archive.size).toBe(0);
+    },
+  );
+
+  it('ignores unsafe completion IDs without creating progress', async () => {
+    const api = database();
+    const client = await open(api);
+    for (const id of ['', '__proto__', 'constructor', 'prototype', 'x'.repeat(201)])
+      client.setSolved(id, true, 'starter');
+    await client.flush();
+    expect(client.getSnapshot().progress).toEqual(empty());
+    expect(api.requests).toHaveLength(0);
+  });
+
+  it.each([true, false])(
+    'recovers an offline solved=%s intent with its original receipt',
+    async (value) => {
+      const original = { ...record('draft', DATE, [attempt(1)]), solved: !value };
+      const api = database({ progress: { version: 1, exercises: { problem: original } } });
+      const saved = storage();
+      const first = await open(api, saved);
+      first.setSolved('problem', value, 'starter');
+      api.failWrites = true;
+      await first.flush();
+      expect(first.getSnapshot().status).toBe('offline');
+      const receipt = api.requests[0].writeIds;
+      first.dispose();
+      api.failWrites = false;
+      const recovered = await open(api, saved);
+      expect(recovered.getSnapshot().progress.exercises.problem).toEqual({
+        ...original,
+        solved: value,
+      });
+      await recovered.flush();
+      expect(api.requests.at(-1)?.writeIds).toEqual(receipt);
+      expect(api.state.progress.exercises.problem).toEqual({ ...original, solved: value });
+    },
+  );
+
+  it('keeps incomplete through drafts, failed submissions, and restores of the same accepted history', async () => {
+    const original = { ...record('accepted draft', DATE, [attempt(1)]), solved: true };
+    const api = database({ progress: { version: 1, exercises: { problem: original } } });
+    const client = await open(api);
+    client.setSolved('problem', false, 'starter');
+    edit(client, 'working draft');
+    submit(client, { ...attempt(2), status: 'failed', passed: 0 });
+    client.restore({ version: 1, exercises: { problem: original } });
+    expect(client.getSnapshot().progress.exercises.problem.solved).toBe(false);
+    expect(client.getSnapshot().progress.exercises.problem.attempts).toHaveLength(2);
+    await client.flush();
+    expect(api.state.progress.exercises.problem.solved).toBe(false);
+    client.restore({ version: 1, exercises: { problem: original } });
+    await client.flush();
+    expect(api.state.progress.exercises.problem.solved).toBe(false);
+    expect(api.state.progress.exercises.problem.attempts).toHaveLength(2);
+  });
+
+  it('a genuinely new accepted submission supersedes a pending incomplete choice', async () => {
+    const api = database({ progress: progress() });
+    const client = await open(api);
+    client.setSolved('problem', false, 'starter');
+    submit(client, attempt(1));
+    expect(client.getSnapshot().progress.exercises.problem.solved).toBe(true);
+    await client.flush();
+    expect(api.state.progress.exercises.problem.solved).toBe(true);
+    expect(api.state.progress.exercises.problem.attempts).toEqual([attempt(1)]);
+    expect(api.state.writes).toHaveLength(2);
+  });
+
+  it('does not infer completion merely from accepted attempts in an explicitly unsolved backup', async () => {
+    const api = database();
+    const client = await open(api);
+    client.restore({ version: 1, exercises: { problem: record('backup', DATE, [attempt(1)]) } });
+    await client.flush();
+    expect(api.state.progress.exercises.problem.solved).toBe(false);
+  });
+
+  it.each(['accepted', 'toggle'] as const)(
+    'retains a newer %s completion while an incomplete save is in flight',
+    async (kind) => {
+      const api = database({ progress: progress() });
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      let pause = true;
+      const client = await open(api, storage(), {
+        fetch: (async (input, init) => {
+          if (init?.method === 'PUT' && pause) {
+            pause = false;
+            await gate;
+          }
+          return api.fetch(input, init);
+        }) as typeof fetch,
+      });
+      client.setSolved('problem', false, 'starter');
+      const saving = client.flush();
+      if (kind === 'accepted') submit(client, attempt(1));
+      else client.setSolved('problem', true, 'starter');
+      release();
+      await saving;
+      expect(api.state.progress.exercises.problem.solved).toBe(false);
+      expect(client.getSnapshot().progress.exercises.problem.solved).toBe(true);
+      expect(client.getSnapshot().status).toBe('saving');
+      await client.flush();
+      expect(api.state.progress.exercises.problem.solved).toBe(true);
+      expect(api.state.writes).toHaveLength(2);
+      expect(api.state.progress.exercises.problem.attempts).toHaveLength(
+        kind === 'accepted' ? 1 : 0,
+      );
+    },
+  );
+
+  it('keeps a manual incomplete choice made during an automatic accepted save', async () => {
+    const api = database({ progress: progress() });
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let pause = true;
+    const client = await open(api, storage(), {
+      fetch: (async (input, init) => {
+        if (init?.method === 'PUT' && pause) {
+          pause = false;
+          await gate;
+        }
+        return api.fetch(input, init);
+      }) as typeof fetch,
+    });
+    submit(client, attempt(1));
+    const saving = client.flush();
+    client.setSolved('problem', false, 'starter');
+    release();
+    await saving;
+    expect(client.getSnapshot().progress.exercises.problem.solved).toBe(false);
+    await client.flush();
+    expect(api.state.progress.exercises.problem.solved).toBe(false);
+    expect(api.state.progress.exercises.problem.attempts).toEqual([attempt(1)]);
+  });
+
+  it('does not resurrect a remote incomplete choice when a stale tab saves only a draft', async () => {
+    const original = { ...record('original', DATE, [attempt(1)]), solved: true };
+    const api = database({ progress: { version: 1, exercises: { problem: original } } });
+    const stale = await open(api);
+    edit(stale, 'new draft', LATER);
+    const second = await open(api);
+    second.setSolved('problem', false, 'starter');
+    await second.flush();
+    await stale.flush();
+    expect(api.state.progress.exercises.problem).toEqual({
+      ...original,
+      draft: 'new draft',
+      updatedAt: LATER,
+      solved: false,
+    });
+    expect(api.requests.at(-1)?.writeIds).toEqual([]);
+  });
+
+  it('merges remote attempts and a newer draft without suppressing a deliberate incomplete choice', async () => {
+    const api = database({ progress: progress() });
+    const manual = await open(api);
+    const automatic = await open(api);
+    manual.setSolved('problem', false, 'unused starter');
+    edit(automatic, 'accepted draft', LATER);
+    submit(automatic, attempt(1));
+    await automatic.flush();
+    await manual.flush();
+    expect(api.state.progress.exercises.problem.solved).toBe(false);
+    expect(api.state.progress.exercises.problem.draft).toBe('accepted draft');
+    expect(api.state.progress.exercises.problem.attempts).toEqual([attempt(1)]);
+  });
+
+  it.each([true, false])(
+    'does not replay an acknowledged solved=%s after a lost response and a newer remote choice',
+    async (value) => {
+      const api = database({ progress: progress() });
+      const first = await open(api);
+      first.setSolved('problem', value, 'starter');
+      api.loseNextResponse = true;
+      await first.flush();
+      const second = await open(api);
+      second.setSolved('problem', !value, 'starter');
+      await second.flush();
+      edit(first, 'new local draft', LATER);
+      await first.flush();
+      expect(api.state.progress.exercises.problem.solved).toBe(!value);
+      expect(api.state.progress.exercises.problem.draft).toBe('new local draft');
+      expect(api.requests.at(-1)?.writeIds).toEqual([]);
+    },
+  );
+
+  it('does not replay a recovered acknowledged completion through its copied solved flag', async () => {
+    const saved = storage({
+      [OUTBOX_PREFIX + 'old']: JSON.stringify({
+        version: 1,
+        generation: 'old-generation',
+        progress: {
+          version: 1,
+          exercises: { problem: { ...record('pending draft', LATER), solved: true } },
+        },
+        stars: {},
+        solved: { problem: { value: true, at: DATE, id: 'acknowledged' } },
+      }),
+    });
+    const api = database({ progress: progress(), writes: ['acknowledged'] });
+    const client = await open(api, saved);
+    expect(client.getSnapshot().progress.exercises.problem.solved).toBe(false);
+    await client.flush();
+    expect(api.state.progress.exercises.problem.solved).toBe(false);
+    expect(api.state.progress.exercises.problem.draft).toBe('pending draft');
+    expect(api.requests[0].writeIds).toEqual([]);
+  });
+
+  it('does not replay a legacy solved flag when its accepted history is already saved as incomplete', async () => {
+    const oldRecord = { ...record('older draft', DATE, [attempt(1)]), solved: true };
+    const saved = storage({
+      [OUTBOX_PREFIX + 'legacy']: JSON.stringify({
+        version: 1,
+        generation: 'legacy-generation',
+        progress: {
+          version: 1,
+          exercises: { problem: { ...oldRecord, draft: 'recovered draft', updatedAt: LATER } },
+        },
+        stars: {},
+      }),
+    });
+    const api = database({
+      progress: { version: 1, exercises: { problem: { ...oldRecord, solved: false } } },
+    });
+    const client = await open(api, saved);
+    expect(client.getSnapshot().progress.exercises.problem.solved).toBe(false);
+    await client.flush();
+    expect(api.state.progress.exercises.problem).toEqual({
+      ...oldRecord,
+      draft: 'recovered draft',
+      updatedAt: LATER,
+      solved: false,
+    });
+    expect(api.archive.size).toBe(1);
+  });
+
+  it('preserves a genuinely new accepted result in a legacy outbox', async () => {
+    const saved = storage({
+      [OUTBOX_PREFIX + 'legacy']: JSON.stringify({
+        version: 1,
+        generation: 'legacy-generation',
+        progress: {
+          version: 1,
+          exercises: { problem: { ...record('accepted', LATER, [attempt(1)]), solved: true } },
+        },
+        stars: {},
+      }),
+    });
+    const api = database({ progress: progress() });
+    const client = await open(api, saved);
+    expect(client.getSnapshot().progress.exercises.problem.solved).toBe(true);
+    await client.flush();
+    expect(api.state.progress.exercises.problem.solved).toBe(true);
+    expect(api.state.progress.exercises.problem.attempts).toEqual([attempt(1)]);
+  });
+
+  it('observes a recovered intent acknowledgement on refresh without losing a newer draft', async () => {
+    const saved = storage();
+    const api = database({ progress: progress() });
+    const first = await open(api, saved);
+    first.setSolved('problem', true, 'starter');
+    const recovering = await open(api, saved);
+    await recovering.flush();
+    const remote = await open(api);
+    remote.setSolved('problem', false, 'starter');
+    await remote.flush();
+    edit(first, 'later draft', LATER);
+    await first.refresh();
+    expect(first.getSnapshot().progress.exercises.problem.solved).toBe(false);
+    await first.flush();
+    expect(api.state.progress.exercises.problem.solved).toBe(false);
+    expect(api.state.progress.exercises.problem.draft).toBe('later draft');
+  });
+
+  it('recovers the latest intent across multiple outboxes even when the injected clock is unchanged', async () => {
+    const saved = storage();
+    const api = database({ progress: progress() });
+    const first = await open(api, saved);
+    first.setSolved('problem', true, 'starter');
+    const second = await open(api, saved);
+    second.setSolved('problem', false, 'starter');
+    first.dispose();
+    second.dispose();
+    const recovered = await open(api, saved);
+    expect(recovered.getSnapshot().progress.exercises.problem.solved).toBe(false);
+    await recovered.flush();
+    expect(api.state.progress.exercises.problem.solved).toBe(false);
+  });
+
+  it('acknowledges a superseded recovered intent so its original tab cannot replay it', async () => {
+    const saved = storage();
+    const api = database({ progress: progress() });
+    const original = await open(api, saved);
+    original.setSolved('problem', true, 'starter');
+    const recovering = await open(api, saved);
+    recovering.setSolved('problem', false, 'starter');
+    await recovering.flush();
+    expect(api.state.writes).toHaveLength(2);
+    edit(original, 'still working', LATER);
+    await original.flush();
+    expect(api.state.progress.exercises.problem.solved).toBe(false);
+    expect(api.state.progress.exercises.problem.draft).toBe('still working');
+    expect(api.requests.at(-1)?.writeIds).toEqual([]);
+  });
+
+  it('batches a long offline completion receipt trail within the API limit', async () => {
+    const api = database({ progress: progress() });
+    const client = await open(api);
+    for (let index = 0; index < 1_002; index++)
+      client.setSolved('problem', index % 2 === 1, 'starter');
+    await client.flush();
+    expect(client.getSnapshot().status).toBe('saved');
+    expect(api.state.progress.exercises.problem.solved).toBe(true);
+    expect(api.state.progress.exercises.problem.attempts).toEqual([]);
+    expect(api.requests).toHaveLength(2);
+    expect(api.requests[0].progress).toEqual(progress());
+    expect(api.state.writes).toHaveLength(1_002);
+    expect(new Set(api.state.writes).size).toBe(1_002);
+  });
+
+  it('rejects an entire corrupt completion outbox without applying its draft or stars', async () => {
+    const raw = JSON.stringify({
+      version: 1,
+      generation: 'bad-completion',
+      progress: progress('must not leak'),
+      stars: { problem: { value: true, at: DATE, id: 'star' } },
+      solved: { problem: { value: 'false', at: DATE, id: 'invalid-completion' } },
+    });
+    const saved = storage({ [OUTBOX_PREFIX + 'invalid']: raw });
+    const api = database();
+    const client = await open(api, saved);
+    expect(client.getSnapshot().progress).toEqual(empty());
+    expect(client.getSnapshot().stars).toEqual([]);
+    expect(client.getSnapshot().warning).toMatch(/could not be read/);
+    await client.flush();
+    expect(api.requests).toHaveLength(0);
+    expect(saved.getItem(OUTBOX_PREFIX + 'invalid')).toBe(raw);
   });
 });
 

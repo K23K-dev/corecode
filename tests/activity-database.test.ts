@@ -3,8 +3,25 @@ import pg from 'pg';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { assertTestConnection, createIsolatedTestDatabase } from './e2e/database-runtime.mjs';
 import type { Attempt, ProgressData } from '../src/lib/progress';
+import { practiceClock } from '../shared/practice-activity.mjs';
 
-type Activity = { timeZone: string; days: Array<{ date: string; count: number }> };
+type Activity = {
+  timeZone: string;
+  resetHour: number;
+  today: string;
+  resetAt: string;
+  serverNow: string;
+  days: Array<{ date: string; count: number }>;
+  repairs: string[];
+  streak: {
+    current: number;
+    best: number;
+    hearts: number;
+    earnedHearts: number;
+    heartProgress: number;
+    startedOn: string | null;
+  };
+};
 type Backend = {
   initializeDatabase(connectionString: string): Promise<void>;
   startDataServer(options: { connectionString: string; port: number }): Promise<Server>;
@@ -135,7 +152,7 @@ describe.skipIf(process.env.CODE_PRACTICE_RUN_DB_TESTS !== '1')(
 
     beforeEach(async () => {
       await assertTestConnection(client, isolated.connectionString);
-      await client.query(`TRUNCATE TABLE ${schema}.cp_submissions`);
+      await client.query(`TRUNCATE TABLE ${schema}.cp_submissions, ${schema}.cp_streak_repairs`);
       await client.query(
         `UPDATE ${schema}.cp_state SET revision=0, progress=$1::jsonb, stars='[]'::jsonb WHERE profile_id=1`,
         [JSON.stringify(EMPTY)],
@@ -157,10 +174,24 @@ describe.skipIf(process.env.CODE_PRACTICE_RUN_DB_TESTS !== '1')(
       }
     }, 30_000);
 
-    it('returns an empty UTC history with private, non-cacheable response headers', async () => {
+    it('returns an empty fixed-Eastern history with a consistent clock and private response headers', async () => {
       const response = await readActivity();
       expect(response.status).toBe(200);
-      expect(response.body).toEqual({ timeZone: 'UTC', days: [] });
+      expect(response.body).toMatchObject({
+        timeZone: 'America/New_York',
+        resetHour: 20,
+        days: [],
+        repairs: [],
+        streak: {
+          current: 0,
+          best: 0,
+          hearts: 0,
+          earnedHearts: 0,
+          heartProgress: 0,
+          startedOn: null,
+        },
+      });
+      expect(response.body).toMatchObject(practiceClock(new Date(response.body.serverNow)));
       expect(response.headers['cache-control']).toBe('no-store');
       expect(response.headers['x-content-type-options']).toBe('nosniff');
     });
@@ -175,17 +206,17 @@ describe.skipIf(process.env.CODE_PRACTICE_RUN_DB_TESTS !== '1')(
       const saved = await save(0, attempts);
       expect(saved.status).toBe(200);
       expect(saved.body.progress.exercises['retired-problem'].attempts).toHaveLength(20);
-      const expected: Activity = {
-        timeZone: 'UTC',
+      const expected = {
+        timeZone: 'America/New_York',
         days: [
           { date: '2023-12-31', count: 7 },
           { date: '2024-02-29', count: 20 },
         ],
       };
-      expect((await readActivity()).body).toEqual(expected);
+      expect((await readActivity()).body).toMatchObject(expected);
       expect((await save(1, attempts)).status).toBe(200);
       expect((await save(2)).status).toBe(200);
-      expect((await readActivity()).body).toEqual(expected);
+      expect((await readActivity()).body).toMatchObject(expected);
       expect(
         Number((await client.query(`SELECT count(*) FROM ${schema}.cp_submissions`)).rows[0].count),
       ).toBe(27);
@@ -207,29 +238,29 @@ describe.skipIf(process.env.CODE_PRACTICE_RUN_DB_TESTS !== '1')(
         { ...attempt('null-counts'), passed: null, total: null },
         { ...attempt('missing-count'), passed: undefined },
       ]);
-      expect((await readActivity()).body).toEqual({
-        timeZone: 'UTC',
+      expect((await readActivity()).body).toMatchObject({
+        timeZone: 'America/New_York',
         days: [{ date: '2024-02-29', count: 1 }],
       });
     });
 
-    it('groups local dates correctly across both daylight-saving transitions', async () => {
+    it('groups 8 PM practice days correctly across both daylight-saving transitions', async () => {
       const times = [
-        '2024-03-10T04:59:59.999Z',
-        '2024-03-10T05:00:00.000Z',
+        '2024-03-10T00:59:59.999Z',
+        '2024-03-10T01:00:00.000Z',
         '2024-03-10T06:59:59.999Z',
         '2024-03-10T07:00:00.000Z',
-        '2024-03-11T03:59:59.999Z',
-        '2024-03-11T04:00:00.000Z',
-        '2024-11-03T03:59:59.999Z',
-        '2024-11-03T04:00:00.000Z',
+        '2024-03-10T23:59:59.999Z',
+        '2024-03-11T00:00:00.000Z',
+        '2024-11-02T23:59:59.999Z',
+        '2024-11-03T00:00:00.000Z',
         '2024-11-03T05:30:00.000Z',
         '2024-11-03T06:30:00.000Z',
-        '2024-11-04T04:59:59.999Z',
-        '2024-11-04T05:00:00.000Z',
+        '2024-11-04T00:59:59.999Z',
+        '2024-11-04T01:00:00.000Z',
       ];
       await insert(times.map((at, index) => attempt(`dst-${index}`, at)));
-      expect((await readActivity('America/New_York')).body).toEqual({
+      expect((await readActivity()).body).toMatchObject({
         timeZone: 'America/New_York',
         days: [
           { date: '2024-03-09', count: 1 },
@@ -242,15 +273,15 @@ describe.skipIf(process.env.CODE_PRACTICE_RUN_DB_TESTS !== '1')(
       });
     });
 
-    it('handles fractional offsets, leap days, year rollover, and sorted calendar dates', async () => {
+    it('handles 8 PM reset boundaries at leap days and year rollover in sorted order', async () => {
       await insert([
-        attempt('leap-before', '2024-02-29T18:14:59.999Z'),
-        attempt('leap-after', '2024-02-29T18:15:00.000Z'),
-        attempt('year-after', '2023-12-31T18:15:00.000Z'),
-        attempt('year-before', '2023-12-31T18:14:59.999Z'),
+        attempt('leap-before', '2024-03-01T00:59:59.999Z'),
+        attempt('leap-after', '2024-03-01T01:00:00.000Z'),
+        attempt('year-after', '2024-01-01T01:00:00.000Z'),
+        attempt('year-before', '2024-01-01T00:59:59.999Z'),
       ]);
-      expect((await readActivity('Asia/Kathmandu')).body).toEqual({
-        timeZone: 'Asia/Kathmandu',
+      expect((await readActivity()).body).toMatchObject({
+        timeZone: 'America/New_York',
         days: [
           { date: '2023-12-31', count: 1 },
           { date: '2024-01-01', count: 1 },
@@ -285,14 +316,17 @@ describe.skipIf(process.env.CODE_PRACTICE_RUN_DB_TESTS !== '1')(
       ).rows;
       const response = await readActivity();
       expect(response.status).toBe(200);
-      expect(response.body).toEqual({ timeZone: 'UTC', days: [{ date: '2024-02-29', count: 1 }] });
+      expect(response.body).toMatchObject({
+        timeZone: 'America/New_York',
+        days: [{ date: '2024-02-29', count: 1 }],
+      });
       expect(
         (await client.query(`SELECT id, attempt FROM ${schema}.cp_submissions ORDER BY id`)).rows,
       ).toEqual(before);
       expect((await request<{ revision: number }>('GET', '/api/state')).body.revision).toBe(0);
     });
 
-    it('rejects invalid or unbounded time zones with a clear client error', async () => {
+    it('does not let legacy timezone query values change the shared reset calendar', async () => {
       for (const timeZone of [
         '',
         'Not/A_TimeZone',
@@ -302,8 +336,8 @@ describe.skipIf(process.env.CODE_PRACTICE_RUN_DB_TESTS !== '1')(
         ' America/New_York',
       ]) {
         const response = await readActivity(timeZone);
-        expect(response.status, timeZone).toBe(400);
-        expect(response.body).toMatchObject({ code: 'invalid_request' });
+        expect(response.status, timeZone).toBe(200);
+        expect(response.body).toMatchObject({ timeZone: 'America/New_York', resetHour: 20 });
       }
       expect((await readActivity('Pacific/Kiritimati')).status).toBe(200);
     });
@@ -344,6 +378,110 @@ describe.skipIf(process.env.CODE_PRACTICE_RUN_DB_TESTS !== '1')(
           `ALTER TABLE ${schema}.cp_submissions_unavailable RENAME TO cp_submissions`,
         );
       }
+    });
+
+    const earnedAttempts = () =>
+      Array.from({ length: 5 }, (_, index) =>
+        attempt(`earned-${index}`, `2024-03-0${index + 1}T16:00:00.000Z`),
+      );
+    const repair = (date: string) => request<Activity>('POST', '/api/activity/repairs', { date });
+
+    it('spends a heart without creating submissions or changing progress, stars, or revision', async () => {
+      await save(0, earnedAttempts());
+      const state = (await request('GET', '/api/state')).body;
+      const archived = (await client.query(`SELECT * FROM ${schema}.cp_submissions ORDER BY id`))
+        .rows;
+      const result = await repair('2024-03-06');
+      expect(result.status).toBe(200);
+      expect(result.body).toMatchObject({
+        repairs: ['2024-03-06'],
+        streak: { hearts: 0, earnedHearts: 1, best: 6 },
+      });
+      expect(result.body.days).toEqual(
+        earnedAttempts().map((item) => ({ date: item.at.slice(0, 10), count: 1 })),
+      );
+      expect((await request('GET', '/api/state')).body).toEqual(state);
+      expect(
+        (await client.query(`SELECT * FROM ${schema}.cp_submissions ORDER BY id`)).rows,
+      ).toEqual(archived);
+      expect(JSON.stringify(result.body)).not.toMatch(/Private learner|draft|revision|code/);
+      expect(
+        (await client.query(`SELECT version FROM ${schema}.cp_schema_migrations WHERE version=4`))
+          .rows,
+      ).toEqual([{ version: 4 }]);
+      await expect(
+        client.query(`UPDATE ${schema}.cp_streak_repairs SET date='2024-03-07'`),
+      ).rejects.toThrow(/append-only/);
+      await expect(client.query(`DELETE FROM ${schema}.cp_streak_repairs`)).rejects.toThrow(
+        /append-only/,
+      );
+    });
+
+    it('serializes different-date concurrent spends against the same single heart', async () => {
+      await insert(earnedAttempts());
+      const results = await Promise.all([repair('2024-03-06'), repair('2024-03-07')]);
+      expect(results.map((result) => result.status).sort()).toEqual([200, 409]);
+      expect(results.find((result) => result.status === 409)?.body).toMatchObject({
+        code: 'insufficient_hearts',
+      });
+      expect((await readActivity()).body.repairs).toHaveLength(1);
+      expect((await readActivity()).body.streak.hearts).toBe(0);
+    });
+
+    it('makes simultaneous duplicate-date retries successful while spending just once', async () => {
+      await insert(earnedAttempts());
+      const results = await Promise.all([repair('2024-03-06'), repair('2024-03-06')]);
+      expect(results.map((result) => result.status)).toEqual([200, 200]);
+      for (const result of results)
+        expect(result.body).toMatchObject({ repairs: ['2024-03-06'], streak: { hearts: 0 } });
+      expect(
+        Number(
+          (await client.query(`SELECT count(*) FROM ${schema}.cp_streak_repairs`)).rows[0].count,
+        ),
+      ).toBe(1);
+    });
+
+    it('waits for an in-flight submission transaction before deriving the spendable balance', async () => {
+      await insert(earnedAttempts().slice(0, 4));
+      await assertTestConnection(client, isolated.connectionString);
+      await client.query('BEGIN');
+      try {
+        await client.query(
+          `SELECT profile_id FROM ${schema}.cp_state WHERE profile_id=1 FOR UPDATE`,
+        );
+        const result = repair('2024-03-06');
+        await client.query(
+          `INSERT INTO ${schema}.cp_submissions(id, exercise_id, attempt) VALUES($1, 'retired-problem', $2::jsonb)`,
+          ['earned-4', JSON.stringify(earnedAttempts()[4])],
+        );
+        await client.query('COMMIT');
+        const response = await result;
+        expect(response.status).toBe(200);
+        expect(response.body.streak).toMatchObject({ hearts: 0, earnedHearts: 1 });
+      } catch (error) {
+        await client.query('ROLLBACK');
+        throw error;
+      }
+    });
+
+    it('rejects invalid dates, completed days, and empty balances without a repair row', async () => {
+      await insert(earnedAttempts().slice(0, 4));
+      const today = (await readActivity()).body.today;
+      for (const value of [
+        { date: '2024-02-30' },
+        { date: '2024-03-06', hearts: 9 },
+        { date: today },
+        { date: '2024-03-01' },
+        { date: '2024-02-29' },
+      ]) {
+        expect((await request('POST', '/api/activity/repairs', value)).status).toBe(400);
+      }
+      expect((await repair('2024-03-06')).status).toBe(409);
+      expect(
+        Number(
+          (await client.query(`SELECT count(*) FROM ${schema}.cp_streak_repairs`)).rows[0].count,
+        ),
+      ).toBe(0);
     });
   },
 );

@@ -11,6 +11,7 @@ const mocks = vi.hoisted(() => ({
   readExecutionProblem: vi.fn(),
   readState: vi.fn(),
   readActivity: vi.fn(),
+  repairActivity: vi.fn(),
   writeState: vi.fn(),
   executeProblem: vi.fn(),
 }));
@@ -31,6 +32,7 @@ vi.mock('../server/repository.mjs', async (importOriginal) => ({
   readExecutionProblem: mocks.readExecutionProblem,
   readState: mocks.readState,
   readActivity: mocks.readActivity,
+  repairActivity: mocks.repairActivity,
   writeState: mocks.writeState,
 }));
 vi.mock('../runner/execution.mjs', () => ({ executeProblem: mocks.executeProblem }));
@@ -78,6 +80,16 @@ const RUN = {
   mode: 'submit',
 };
 const RESULT = { cases: [{ name: 'Fixture', passed: true }], stdout: '', durationMs: 1 };
+const ACTIVITY = {
+  timeZone: 'America/New_York',
+  resetHour: 20,
+  today: '2024-03-12',
+  resetAt: '2024-03-13T00:00:00.000Z',
+  serverNow: '2024-03-12T16:00:00.000Z',
+  days: [],
+  repairs: [],
+  streak: { current: 0, best: 0, hearts: 0, earnedHearts: 0, heartProgress: 0, startedOn: null },
+};
 const pool = { query: mocks.query, end: mocks.end };
 let server: Server;
 let servers: Server[];
@@ -170,7 +182,8 @@ beforeEach(async () => {
   mocks.readCatalog.mockResolvedValue(CATALOG);
   mocks.readExecutionProblem.mockResolvedValue(EXECUTION_PROBLEM);
   mocks.readState.mockResolvedValue(STATE);
-  mocks.readActivity.mockImplementation(async (_pool, timeZone) => ({ timeZone, days: [] }));
+  mocks.readActivity.mockResolvedValue(ACTIVITY);
+  mocks.repairActivity.mockResolvedValue({ ...ACTIVITY, repairs: ['2024-03-06'] });
   mocks.writeState.mockImplementation(async (_pool, value) => {
     validateStateUpdate(value);
     return { ...STATE, revision: 5 };
@@ -194,7 +207,7 @@ describe('HTTP routes and response contract without a database', () => {
       ['/api/health', { ok: true }],
       ['/api/catalog', CATALOG],
       ['/api/state', STATE],
-      ['/api/activity', { timeZone: 'UTC', days: [] }],
+      ['/api/activity', ACTIVITY],
     ] as const) {
       const reply = await request('GET', pathname);
       expect(reply.status).toBe(200);
@@ -203,7 +216,7 @@ describe('HTTP routes and response contract without a database', () => {
     }
     expect(mocks.readCatalog).toHaveBeenCalledWith(pool);
     expect(mocks.readState).toHaveBeenCalledWith(pool);
-    expect(mocks.readActivity).toHaveBeenCalledWith(pool, 'UTC');
+    expect(mocks.readActivity).toHaveBeenCalledWith(pool);
     expect(mocks.initializeDatabase).not.toHaveBeenCalled();
   });
 
@@ -216,13 +229,80 @@ describe('HTTP routes and response contract without a database', () => {
     expectPrivateJson(reply);
   });
 
-  it('passes the first decoded timeZone query value, preserving an explicit empty value', async () => {
+  it('uses the fixed Eastern reset schedule regardless of legacy timezone query values', async () => {
     const reply = await request('GET', '/api/activity?timeZone=America%2FNew_York&timeZone=UTC');
-    expect(reply.body).toEqual({ timeZone: 'America/New_York', days: [] });
-    expect(mocks.readActivity).toHaveBeenLastCalledWith(pool, 'America/New_York');
+    expect(reply.body).toEqual(ACTIVITY);
+    expect(mocks.readActivity).toHaveBeenLastCalledWith(pool);
     await request('GET', '/api/activity?timeZone=');
-    expect(mocks.readActivity).toHaveBeenLastCalledWith(pool, '');
+    expect(mocks.readActivity).toHaveBeenLastCalledWith(pool);
   });
+
+  it('passes repair requests to their atomic repository operation and returns current activity', async () => {
+    const reply = await request(
+      'POST',
+      '/api/activity/repairs',
+      JSON.stringify({ date: '2024-03-06' }),
+    );
+    expect(reply.status).toBe(200);
+    expect(reply.body).toEqual({ ...ACTIVITY, repairs: ['2024-03-06'] });
+    expect(mocks.repairActivity).toHaveBeenCalledExactlyOnceWith(pool, { date: '2024-03-06' });
+    expect(mocks.writeState).not.toHaveBeenCalled();
+    expectPrivateJson(reply);
+  });
+
+  it('protects repair requests with origin, client marker, and JSON guards', async () => {
+    for (const headers of [
+      { Origin: undefined },
+      { Origin: 'https://evil.example' },
+      { 'X-Code-Practice-Client': undefined },
+    ]) {
+      expect((await request('POST', '/api/activity/repairs', '{}', { headers })).status).toBe(403);
+    }
+    expect(
+      (
+        await request('POST', '/api/activity/repairs', '{}', {
+          headers: { 'Content-Type': 'text/plain' },
+        })
+      ).status,
+    ).toBe(415);
+    expect((await request('POST', '/api/activity/repairs', '{broken')).status).toBe(400);
+    expect(mocks.repairActivity).not.toHaveBeenCalled();
+  });
+
+  it('preserves repair eligibility errors and sanitizes unexpected storage errors', async () => {
+    mocks.repairActivity.mockRejectedValueOnce(
+      new RequestError('No hearts available.', 409, 'insufficient_hearts'),
+    );
+    const denied = await request(
+      'POST',
+      '/api/activity/repairs',
+      JSON.stringify({ date: '2024-03-06' }),
+    );
+    expect(denied.status).toBe(409);
+    expect(denied.body).toEqual({ error: 'No hearts available.', code: 'insufficient_hearts' });
+    mocks.repairActivity.mockRejectedValueOnce(new Error('private database credentials'));
+    const failure = await request(
+      'POST',
+      '/api/activity/repairs',
+      JSON.stringify({ date: '2024-03-06' }),
+    );
+    expect(failure.status).toBe(503);
+    expect(failure.text).not.toContain('private database credentials');
+    expectPrivateJson(failure);
+  });
+
+  it.each(['GET', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'])(
+    'rejects non-POST %s repairs without mutations',
+    async (method) => {
+      const reply = await request(
+        method,
+        '/api/activity/repairs',
+        method === 'PUT' ? '{}' : undefined,
+      );
+      expect(reply.status).toBe(405);
+      expect(mocks.repairActivity).not.toHaveBeenCalled();
+    },
+  );
 
   it('passes validated save input to storage and returns its authoritative snapshot', async () => {
     const reply = await request('PUT', '/api/state', JSON.stringify(UPDATE));

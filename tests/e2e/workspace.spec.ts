@@ -215,7 +215,7 @@ test('deck regrouping preserves previously saved drafts, solved status, and subm
   await expect(
     library
       .locator(`tr[data-problem-id="${defaultId}"]`)
-      .getByRole('img', { name: 'Solved', exact: true }),
+      .getByRole('button', { name: 'Mark Normalize text incomplete', exact: true }),
   ).toBeVisible();
   await library.getByRole('button', { name: 'Normalize text', exact: true }).click();
   await expect(page.getByRole('textbox', { name: 'Python solution editor' })).toContainText(

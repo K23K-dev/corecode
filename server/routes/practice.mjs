@@ -1,5 +1,11 @@
 import { Router } from 'express';
-import { readActivity, readCatalog, readState, writeState } from '../repository.mjs';
+import {
+  readActivity,
+  readCatalog,
+  readState,
+  repairActivity,
+  writeState,
+} from '../repository.mjs';
 import { methodNotAllowed } from '../middleware/errors.mjs';
 import { jsonBody } from '../middleware/json.mjs';
 
@@ -32,10 +38,15 @@ export function practiceRoutes(pool) {
   router
     .route('/api/activity')
     .head(methodNotAllowed)
-    .get(async (request, response) => {
-      const timeZone = request.practiceUrl.searchParams.get('timeZone') ?? 'UTC';
-      response.json(await readActivity(pool, timeZone));
-    })
+    .get(async (_request, response) => response.json(await readActivity(pool)))
+    .all(methodNotAllowed);
+
+  router
+    .route('/api/activity/repairs')
+    .head(methodNotAllowed)
+    .post(jsonBody, async (request, response) =>
+      response.json(await repairActivity(pool, request.body)),
+    )
     .all(methodNotAllowed);
 
   return router;

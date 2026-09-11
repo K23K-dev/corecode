@@ -58,6 +58,7 @@ function EmptyCatalog({ catalog, client }: { catalog: Catalog; client: ProgressC
         starred={state.stars}
         saveState={state.status}
         onStar={(id, value) => client.setStar(id, value)}
+        onSolved={(item, value) => client.setSolved(item.id, value, item.starterCode)}
         onSelect={() => {}}
       />
     </div>
@@ -417,6 +418,7 @@ function WorkspaceApp({ catalog, client }: { catalog: Catalog; client: ProgressC
             starred={stars}
             saveState={status}
             onStar={(id, value) => client.setStar(id, value)}
+            onSolved={(item, value) => client.setSolved(item.id, value, item.starterCode)}
           />
         </div>
       </Activity>

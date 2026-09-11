@@ -1,7 +1,19 @@
 import { createHash } from 'node:crypto';
 import { Pool } from 'pg';
 import { validateNeonConnectionString } from './database-config.mjs';
-import { identifier, RequestError, stableJson, validateStateUpdate } from './validation.mjs';
+import {
+  identifier,
+  plainObject,
+  RequestError,
+  stableJson,
+  validateStateUpdate,
+} from './validation.mjs';
+import {
+  isDateKey,
+  practiceClock,
+  practiceDateKey,
+  summarizeActivity,
+} from '../shared/practice-activity.mjs';
 
 const MIGRATION_SQL = `
   CREATE TABLE IF NOT EXISTS cp_schema_migrations (
@@ -67,6 +79,10 @@ const MIGRATION_SQL = `
     id text PRIMARY KEY,
     applied_at timestamptz NOT NULL DEFAULT now()
   );
+  CREATE TABLE IF NOT EXISTS cp_streak_repairs (
+    date date PRIMARY KEY CHECK (date BETWEEN DATE '0001-01-01' AND DATE '9999-12-31'),
+    repaired_at timestamptz NOT NULL DEFAULT now()
+  );
   CREATE OR REPLACE FUNCTION cp_reject_immutable_change() RETURNS trigger LANGUAGE plpgsql AS $$
   BEGIN
     RAISE EXCEPTION 'Historical practice records are append-only';
@@ -87,11 +103,16 @@ const MIGRATION_SQL = `
       CREATE TRIGGER cp_grading_specs_immutable BEFORE UPDATE OR DELETE ON cp_grading_specs
         FOR EACH ROW EXECUTE FUNCTION cp_reject_immutable_change();
     END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_trigger WHERE tgname = 'cp_streak_repairs_immutable' AND tgrelid = 'cp_streak_repairs'::regclass) THEN
+      CREATE TRIGGER cp_streak_repairs_immutable BEFORE UPDATE OR DELETE ON cp_streak_repairs
+        FOR EACH ROW EXECUTE FUNCTION cp_reject_immutable_change();
+    END IF;
   END $$;
   INSERT INTO cp_state(profile_id) VALUES(1) ON CONFLICT DO NOTHING;
   INSERT INTO cp_schema_migrations(version) VALUES(1) ON CONFLICT DO NOTHING;
   INSERT INTO cp_schema_migrations(version) VALUES(2) ON CONFLICT DO NOTHING;
   INSERT INTO cp_schema_migrations(version) VALUES(3) ON CONFLICT DO NOTHING;
+  INSERT INTO cp_schema_migrations(version) VALUES(4) ON CONFLICT DO NOTHING;
 `;
 
 export function makePool(connectionString) {
@@ -186,61 +207,119 @@ export async function readState(client) {
   return { ...row, revision: Number(row.revision) };
 }
 
-/** Counts immutable accepted submissions, independently of the twenty-attempt UI snapshot. */
-export async function readActivity(pool, timeZone = 'UTC') {
-  if (
-    typeof timeZone !== 'string' ||
-    timeZone.length > 100 ||
-    !/^[A-Za-z][A-Za-z0-9._+-]*(?:\/[A-Za-z0-9._+-]+)*$/.test(timeZone)
-  ) {
-    throw new RequestError('Activity time zone must be a valid IANA time zone.');
+/** One MVCC snapshot contains only accepted timestamps and immutable repairs, never learner code. */
+export async function readActivity(pool, now) {
+  const {
+    rows: [row],
+  } = await pool.query(`SELECT
+    COALESCE((SELECT jsonb_agg(attempt->>'at') FROM cp_submissions
+      WHERE attempt->>'status' = 'accepted'
+        AND jsonb_typeof(attempt->'passed') = 'number' AND jsonb_typeof(attempt->'total') = 'number'
+        AND attempt->'passed' = attempt->'total' AND attempt->'total' > '0'::jsonb), '[]'::jsonb) AS timestamps,
+    COALESCE((SELECT jsonb_agg(to_char(date, 'YYYY-MM-DD') ORDER BY date) FROM cp_streak_repairs), '[]'::jsonb) AS repairs`);
+  // Capture the response clock after database latency, not when the HTTP request began.
+  const frozenNow = new Date(now === undefined ? Date.now() : now);
+  const clock = practiceClock(frozenNow);
+  if (!row || !Array.isArray(row.timestamps) || !Array.isArray(row.repairs)) {
+    throw new Error('Invalid stored activity snapshot.');
   }
-  let formatter;
-  try {
-    formatter = new Intl.DateTimeFormat('en-US', {
-      timeZone,
-      calendar: 'iso8601',
-      numberingSystem: 'latn',
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-    });
-  } catch {
-    throw new RequestError('Activity time zone must be a valid IANA time zone.');
-  }
-
-  const now = Date.now();
-  // Fetch only timestamps, never submitted code. JSON comparisons avoid casts that could fail on legacy data.
-  const { rows } = await pool.query(`SELECT attempt->>'at' AS at FROM cp_submissions
-    WHERE attempt->>'status' = 'accepted'
-      AND jsonb_typeof(attempt->'passed') = 'number' AND jsonb_typeof(attempt->'total') = 'number'
-      AND attempt->'passed' = attempt->'total' AND attempt->'total' > '0'::jsonb`);
   const counts = new Map();
-  for (const { at } of rows) {
+  for (const at of row.timestamps) {
     // Use the same UTC ISO format as saved progress; reject normalized invalid dates and future clock skew.
     if (typeof at !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(at))
       continue;
     const timestamp = new Date(at);
     if (
       !Number.isFinite(timestamp.getTime()) ||
-      timestamp.getTime() > now ||
+      timestamp.getTime() > frozenNow.getTime() ||
       timestamp.getUTCFullYear() < 1 ||
       timestamp.toISOString().slice(0, 19) !== at.slice(0, 19)
     )
       continue;
-    const parts = Object.fromEntries(
-      formatter.formatToParts(timestamp).map((part) => [part.type, part.value]),
-    );
-    const date = `${parts.year.padStart(4, '0')}-${parts.month}-${parts.day}`;
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) continue;
+    let date;
+    try {
+      date = practiceDateKey(timestamp);
+    } catch (error) {
+      if (error instanceof RangeError) continue;
+      throw error;
+    }
     counts.set(date, (counts.get(date) ?? 0) + 1);
   }
+  const days = [...counts]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([date, count]) => ({ date, count }));
+  const repairs = row.repairs;
+  if (!repairs.every(isDateKey)) throw new Error('Invalid stored streak repair.');
   return {
-    timeZone,
-    days: [...counts]
-      .sort(([left], [right]) => left.localeCompare(right))
-      .map(([date, count]) => ({ date, count })),
+    timeZone: 'America/New_York',
+    resetHour: 20,
+    today: clock.today,
+    resetAt: clock.resetAt,
+    serverNow: frozenNow.toISOString(),
+    days,
+    repairs,
+    streak: summarizeActivity(days, repairs, clock.today),
   };
+}
+
+/** Spend one derived heart without modifying progress, revisions, or the submission archive. */
+export async function repairActivity(pool, value, now) {
+  const body = plainObject(value, 'Streak repair');
+  if (Object.keys(body).length !== 1 || !Object.hasOwn(body, 'date') || !isDateKey(body.date)) {
+    throw new RequestError('Provide only a valid repair date in YYYY-MM-DD format.');
+  }
+  const date = body.date;
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+    // Share the progress writer's lock so submissions and competing spends cannot race this balance.
+    const locked = await client.query(
+      'SELECT profile_id FROM cp_state WHERE profile_id = 1 FOR UPDATE',
+    );
+    if (!locked.rows[0]) throw new Error('The practice profile is unavailable.');
+    const current = await readActivity(client, now);
+    let result = current;
+    if (!current.repairs.includes(date)) {
+      if (
+        !current.streak.startedOn ||
+        date < current.streak.startedOn ||
+        date >= current.today ||
+        current.days.some((day) => day.date === date)
+      ) {
+        throw new RequestError(
+          'Choose a missed, completed practice day since your first accepted submission.',
+          400,
+          'invalid_repair',
+        );
+      }
+      if (current.streak.hearts < 1) {
+        throw new RequestError(
+          'Earn a heart by completing five days in a row before repairing a missed day.',
+          409,
+          'insufficient_hearts',
+        );
+      }
+      await client.query('INSERT INTO cp_streak_repairs(date) VALUES($1::date)', [date]);
+      const repairs = [...current.repairs, date].sort();
+      result = {
+        ...current,
+        repairs,
+        streak: summarizeActivity(current.days, repairs, current.today),
+      };
+    }
+    await client.query('COMMIT');
+    // A slow commit can cross 8 PM. Refresh once on the same released-lock connection,
+    // retaining a single coherent snapshot without holding another pool connection.
+    if (now === undefined && Date.now() >= Date.parse(result.resetAt)) {
+      return await readActivity(client);
+    }
+    return result;
+  } catch (error) {
+    await client.query('ROLLBACK').catch(() => {});
+    throw error;
+  } finally {
+    client.release();
+  }
 }
 
 export class StateConflict extends RequestError {

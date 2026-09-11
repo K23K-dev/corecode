@@ -28,7 +28,7 @@ export const test = base.extend<{ database: TestDatabase; catalog: TestCatalog }
         await client.query('BEGIN');
         try {
           await client.query(
-            `TRUNCATE TABLE ${schema}.cp_submissions, ${schema}.cp_migration_receipts, ${schema}.cp_write_receipts`,
+            `TRUNCATE TABLE ${schema}.cp_submissions, ${schema}.cp_streak_repairs, ${schema}.cp_migration_receipts, ${schema}.cp_write_receipts`,
           );
           await client.query(
             `UPDATE ${schema}.cp_state SET revision = 0, progress = $1::jsonb, stars = $2::jsonb WHERE profile_id = 1`,

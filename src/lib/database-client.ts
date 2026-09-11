@@ -28,8 +28,13 @@ export type ClientView = {
   warning: string;
 };
 type Storage = ProgressStorage & { length: number; key(index: number): string | null };
-type StarChange = { value: boolean; at: string; id: string };
-type Pending = { progress: ProgressData; stars: Record<string, StarChange> };
+type BooleanChange = { value: boolean; at: string; id: string };
+type SolvedChange = BooleanChange & { supersedes?: string[] };
+type Pending = {
+  progress: ProgressData;
+  stars: Record<string, BooleanChange>;
+  solved: Record<string, SolvedChange>;
+};
 type Outbox = Pending & { version: 1; generation: string };
 type Dependencies = {
   fetch?: typeof fetch;
@@ -42,7 +47,7 @@ export const OUTBOX_PREFIX = 'coding-practice:pending:postgres:v1:';
 export const MIGRATION_KEY = 'coding-practice:migration:postgres:v1';
 export const STAR_STORAGE_KEY = 'coding-practice:starred:v1';
 const empty = (): ProgressData => ({ version: 1, exercises: {} });
-const emptyPending = (): Pending => ({ progress: empty(), stars: {} });
+const emptyPending = (): Pending => ({ progress: empty(), stars: {}, solved: {} });
 const safeId = (id: unknown): id is string =>
   typeof id === 'string' &&
   id.length > 0 &&
@@ -102,6 +107,28 @@ function applyStars(base: string[], changes: Pending['stars']): string[] {
     else next.delete(id);
   }
   return [...next].sort();
+}
+
+function applySolved(progress: ProgressData, changes: Pending['solved']): ProgressData {
+  const exercises = { ...progress.exercises };
+  for (const [id, change] of Object.entries(changes)) {
+    if (exercises[id]) exercises[id] = { ...exercises[id], solved: change.value };
+  }
+  return { version: 1, exercises };
+}
+
+function combineSolved(previous: SolvedChange | undefined, incoming: SolvedChange): SolvedChange {
+  if (!previous) return incoming;
+  const [winner, older] =
+    incoming.at + incoming.id > previous.at + previous.id
+      ? [incoming, previous]
+      : [previous, incoming];
+  return {
+    ...winner,
+    supersedes: [
+      ...new Set([...(winner.supersedes ?? []), older.id, ...(older.supersedes ?? [])]),
+    ].filter((id) => id !== winner.id),
+  };
 }
 
 function parseState(value: unknown): StateSnapshot {
@@ -272,12 +299,17 @@ export class ProgressClient {
   };
   private get dirty() {
     return Boolean(
-      Object.keys(this.pending.progress.exercises).length || Object.keys(this.pending.stars).length,
+      Object.keys(this.pending.progress.exercises).length ||
+      Object.keys(this.pending.stars).length ||
+      Object.keys(this.pending.solved).length,
     );
   }
   private publish(status: ClientView['status'], warning = '') {
     this.view = {
-      progress: mergeProgress(this.base.progress, this.pending.progress),
+      progress: applySolved(
+        mergeProgress(this.base.progress, this.pending.progress),
+        this.pending.solved,
+      ),
       stars: applyStars(this.base.stars, this.pending.stars),
       status: status === 'saved' && this.draftConflict ? 'conflict' : status,
       warning: [warning, this.recoveryWarning, this.draftConflict].filter(Boolean).join(' '),
@@ -405,9 +437,15 @@ export class ProgressClient {
           const progress = parseProgressBackup(JSON.stringify(value.progress), {
             retainAttempts: true,
           });
-          const entries = Object.entries(value.stars);
           if (
-            entries.some(
+            value.solved !== undefined &&
+            (!value.solved || typeof value.solved !== 'object' || Array.isArray(value.solved))
+          )
+            throw new Error('Invalid pending completion.');
+          const entries = Object.entries(value.stars);
+          const solvedEntries = Object.entries(value.solved ?? {});
+          if (
+            [...entries, ...solvedEntries].some(
               ([id, change]) =>
                 !safeId(id) ||
                 !change ||
@@ -416,12 +454,41 @@ export class ProgressClient {
                 !safeId(change.id),
             )
           )
-            throw new Error('Invalid pending star.');
+            throw new Error('Invalid pending change.');
+          if (
+            solvedEntries.some(
+              ([, change]) =>
+                change.supersedes !== undefined &&
+                (!Array.isArray(change.supersedes) || !change.supersedes.every(safeId)),
+            )
+          )
+            throw new Error('Invalid completion receipts.');
           for (const [id, change] of entries) {
             if (this.base.writes.includes(change.id)) continue;
             const previous = this.pending.stars[id];
             if (!previous || change.at + change.id > previous.at + previous.id)
               this.pending.stars[id] = change;
+          }
+          for (const [id, change] of solvedEntries) {
+            if (this.base.writes.includes(change.id)) continue;
+            this.pending.solved[id] = combineSolved(this.pending.solved[id], change);
+          }
+          // A receipt acknowledges the intent, not a copied solved flag in its draft.
+          for (const [id] of solvedEntries)
+            if (progress.exercises[id]) progress.exercises[id].solved = false;
+          for (const [id, record] of Object.entries(progress.exercises)) {
+            const saved = this.base.progress.exercises[id];
+            if (!record.solved || !saved || saved.solved) continue;
+            const knownAttempts = new Set(saved.attempts.map((attempt) => attempt.id));
+            const newAcceptance = record.attempts.some(
+              (attempt) =>
+                attempt.status === 'accepted' &&
+                attempt.total > 0 &&
+                attempt.passed === attempt.total &&
+                !knownAttempts.has(attempt.id),
+            );
+            // Legacy outboxes contain whole records, including stale completion flags.
+            if (!newAcceptance) record.solved = false;
           }
           this.pending.progress = mergeProgress(this.pending.progress, progress, true);
           this.recovered.set(key, raw);
@@ -476,9 +543,30 @@ export class ProgressClient {
         { version: 1, exercises: { [id]: record } },
         true,
       );
+      const knownAttempts = new Set(
+        [
+          ...(before.exercises[id]?.attempts ?? []),
+          ...(this.base.progress.exercises[id]?.attempts ?? []),
+          ...(this.pending.progress.exercises[id]?.attempts ?? []),
+        ].map((attempt) => attempt.id),
+      );
+      const accepted = value.attempts.filter(
+        (attempt) =>
+          attempt.status === 'accepted' && attempt.total > 0 && attempt.passed === attempt.total,
+      );
+      const newAcceptance = accepted.some((attempt) => !knownAttempts.has(attempt.id));
+      if (
+        value.solved &&
+        (newAcceptance ||
+          (!before.exercises[id]?.solved &&
+            this.pending.solved[id]?.value !== false &&
+            accepted.length === 0))
+      )
+        this.changeSolved(id, true);
       this.pending.progress.exercises[id] = {
         ...record,
-        solved: merged.exercises[id].solved,
+        // Ordinary draft/history writes must not reapply an old completion choice.
+        solved: false,
         attempts: merged.exercises[id].attempts,
       };
     }
@@ -488,6 +576,28 @@ export class ProgressClient {
     if (!safeId(id)) return;
     this.pending.stars[id] = { value, at: this.now(), id: this.id() };
     this.changed();
+  }
+  setSolved(id: string, value: boolean, starterCode: string): void {
+    if (!safeId(id)) return;
+    if (!this.view.progress.exercises[id])
+      this.pending.progress.exercises[id] = {
+        draft: starterCode,
+        updatedAt: this.now(),
+        solved: false,
+        attempts: [],
+      };
+    else if (this.pending.progress.exercises[id])
+      this.pending.progress.exercises[id] = {
+        ...this.pending.progress.exercises[id],
+        solved: false,
+      };
+    this.changeSolved(id, value);
+    this.changed();
+  }
+  private changeSolved(id: string, value: boolean) {
+    const previous = Date.parse(this.pending.solved[id]?.at ?? '') || 0;
+    const at = new Date(Math.max(Date.parse(this.now()), previous + 1)).toISOString();
+    this.pending.solved[id] = combineSolved(this.pending.solved[id], { value, at, id: this.id() });
   }
   restore(progress: ProgressData) {
     const restored = parseProgressBackup(JSON.stringify(progress));
@@ -532,20 +642,45 @@ export class ProgressClient {
     this.publish('saving');
     try {
       for (let conflict = 0; conflict < 4; conflict++) {
-        for (const [id, change] of Object.entries(sent.stars)) {
-          if (!this.base.writes.includes(change.id)) continue;
-          delete sent.stars[id];
-          if (this.pending.stars[id]?.id === change.id) delete this.pending.stars[id];
+        for (const kind of ['stars', 'solved'] as const) {
+          for (const [id, change] of Object.entries(sent[kind])) {
+            if (!this.base.writes.includes(change.id)) continue;
+            delete sent[kind][id];
+            if (this.pending[kind][id]?.id === change.id) delete this.pending[kind][id];
+          }
         }
-        const merged = mergeProgress(this.base.progress, sent.progress, true);
-        const displaced = Object.entries(sent.progress.exercises).filter(
-          ([id, record]) => merged.exercises[id].draft !== record.draft,
+        const currentIds = [
+          ...Object.values(sent.stars).map((change) => change.id),
+          ...Object.values(sent.solved).map((change) => change.id),
+        ];
+        const olderIds = Object.values(sent.solved).flatMap((change) => change.supersedes ?? []);
+        const writeIds = [...new Set([...currentIds, ...olderIds])].filter(
+          (id) => !this.base.writes.includes(id),
         );
+        // Retire large offline histories first without publishing a completion change.
+        const receiptBatch =
+          writeIds.length > 1_000
+            ? writeIds
+                .filter((id) => !currentIds.includes(id))
+                .slice(0, Math.min(1_000, writeIds.length - 1_000))
+            : [];
+        if (writeIds.length > 1_000 && !receiptBatch.length)
+          throw new Error(
+            'Too many pending changes for one save. Export a backup before retrying.',
+          );
+        const merged = receiptBatch.length
+          ? this.base.progress
+          : applySolved(mergeProgress(this.base.progress, sent.progress, true), sent.solved);
+        const displaced = receiptBatch.length
+          ? []
+          : Object.entries(sent.progress.exercises).filter(
+              ([id, record]) => merged.exercises[id].draft !== record.draft,
+            );
         const { response, body } = await this.put(
           merged,
-          applyStars(this.base.stars, sent.stars),
+          receiptBatch.length ? this.base.stars : applyStars(this.base.stars, sent.stars),
           undefined,
-          Object.values(sent.stars).map((change) => change.id),
+          receiptBatch.length ? receiptBatch : writeIds,
         );
         if (response.status === 409 && (body as { code?: string }).code === 'revision_conflict') {
           this.base = parseState(body);
@@ -558,6 +693,10 @@ export class ProgressClient {
               : 'Changes are not saved to the database. They remain pending in this browser.',
           );
         this.base = parseState(body);
+        if (receiptBatch.length) {
+          conflict--;
+          continue;
+        }
         if (displaced.length) {
           this.draftConflict =
             'A newer database draft was kept for ' +
@@ -576,8 +715,9 @@ export class ProgressClient {
         for (const [id, value] of Object.entries(sent.progress.exercises))
           if (same(this.pending.progress.exercises[id], value))
             delete this.pending.progress.exercises[id];
-        for (const [id, value] of Object.entries(sent.stars))
-          if (same(this.pending.stars[id], value)) delete this.pending.stars[id];
+        for (const kind of ['stars', 'solved'] as const)
+          for (const [id, value] of Object.entries(sent[kind]))
+            if (this.pending[kind][id]?.id === value.id) delete this.pending[kind][id];
         for (const [key, raw] of captures) {
           try {
             if (this.storage?.getItem(key) === raw)
@@ -618,6 +758,9 @@ export class ProgressClient {
       const latest = await this.readState();
       if (this.disposed || this.busy || latest.revision < this.base.revision) return;
       this.base = latest;
+      for (const kind of ['stars', 'solved'] as const)
+        for (const [id, change] of Object.entries(this.pending[kind]))
+          if (this.base.writes.includes(change.id)) delete this.pending[kind][id];
       const receipt = this.storage?.getItem(this.key);
       if (receipt) {
         const value = JSON.parse(receipt) as {

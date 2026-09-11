@@ -136,9 +136,34 @@ for (const width of [1440, 390]) {
       let row = table.locator(`tr[data-problem-id="${problem.id}"]`);
       const library = page.getByRole('main', { name: 'Practice library' });
 
+      const completion = row.locator('.pl-problem-status');
+      await expect(completion).toHaveAccessibleName(`Mark ${problem.title} complete`);
+      await expect(completion).toHaveAttribute('aria-pressed', 'false');
+      // Clicking the nested status icon toggles completion, never the row route.
+      await completion.locator('svg').click();
+      await expect(completion).toHaveAccessibleName(`Mark ${problem.title} incomplete`);
+      await expect(completion).toHaveAttribute('aria-pressed', 'true');
+      await expect(row).toHaveClass(/is-solved/);
+      await expect(page).toHaveURL(/#library$/);
+      await expect(library).toBeVisible();
+      await completion.click();
+      await expect(completion).toHaveAttribute('aria-pressed', 'false');
+      await expect(row).not.toHaveClass(/is-solved/);
+      for (const key of ['Enter', 'Space']) {
+        await completion.focus();
+        await page.keyboard.press(key);
+        await expect(completion).toHaveAttribute('aria-pressed', 'true');
+        await expect(page).toHaveURL(/#library$/);
+        await page.keyboard.press(key);
+        await expect(completion).toHaveAttribute('aria-pressed', 'false');
+        await expect(page).toHaveURL(/#library$/);
+      }
+      await expect(page.locator('.app')).toHaveAttribute('data-save-state', 'saved');
+
       await row.getByRole('button', { name: `Star ${problem.title}`, exact: true }).click();
       const unstar = row.getByRole('button', { name: `Unstar ${problem.title}`, exact: true });
       await expect(unstar).toHaveAttribute('aria-pressed', 'true');
+      await expect(completion).toHaveAttribute('aria-pressed', 'false');
       await expect(page.getByTestId('library-starred-count')).toHaveText('1');
       await expect(page).toHaveURL(/#library$/);
       await expect(library).toBeVisible();
@@ -149,6 +174,7 @@ for (const width of [1440, 390]) {
         row.getByRole('button', { name: `Star ${problem.title}`, exact: true }),
       ).toHaveAttribute('aria-pressed', 'false');
       await expect(page.getByTestId('library-starred-count')).toHaveText('0');
+      await expect(completion).toHaveAttribute('aria-pressed', 'false');
       await expect(page).toHaveURL(/#library$/);
       await expect(library).toBeVisible();
       await expect(page.locator('.app')).toHaveAttribute('data-save-state', 'saved');
@@ -171,6 +197,7 @@ for (const width of [1440, 390]) {
       for (const key of ['Enter', 'Space']) {
         table = await openTable(page, view);
         row = table.locator(`tr[data-problem-id="${problem.id}"]`);
+        await expect(row.locator('.pl-problem-status')).toHaveAttribute('aria-pressed', 'false');
         const title = row.getByRole('button', { name: problem.title, exact: true });
         await expect(
           table.getByRole('row').filter({

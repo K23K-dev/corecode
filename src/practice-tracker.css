@@ -129,6 +129,23 @@
   background: #363636;
   color: #fff;
 }
+.tracker-day-heading {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin: 0 0 15px;
+}
+.tracker-day-heading strong {
+  font-size: 14px;
+  font-weight: 600;
+}
+.tracker-day-heading > span {
+  font-family: Consolas, 'Cascadia Code', monospace;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+  color: #c2c2c2;
+}
 .tracker-month {
   width: 100%;
   border-collapse: collapse;
@@ -149,6 +166,7 @@
   padding: 2px 0;
 }
 .tracker-month button {
+  position: relative;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -160,6 +178,37 @@
   border: 1px solid transparent;
   border-radius: 50%;
   background: transparent;
+}
+.tracker-month button:focus-visible {
+  outline: 2px solid #f5f5f5;
+  outline-offset: 3px;
+}
+.tracker-month .tracker-day-mark {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  bottom: 0;
+  left: calc(50% - 4px);
+  stroke-width: 2;
+  pointer-events: none;
+}
+.tracker-month button:is(.is-active-day, .is-missed-day, .is-repaired-day) > span {
+  transform: translateY(-2px);
+}
+.tracker-month button.is-missed-day {
+  border: 1px dashed #c75b61;
+  color: #e0a4a6;
+}
+.tracker-month button.is-missed-day:hover {
+  background: #3c292b;
+}
+.tracker-month button.is-repaired-day {
+  background: #4a3927;
+  border-color: #b88b4d;
+  color: #f4c67e;
+}
+.tracker-month .is-repaired-day .tracker-day-mark {
+  fill: currentColor;
 }
 .tracker-month button:hover:not(:disabled) {
   background: #3c3c3c;
@@ -213,6 +262,61 @@
 }
 .tracker-streaks > div + div svg {
   color: #ffd000;
+}
+.tracker-hearts {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 8px;
+  padding: 10px;
+  background: #232323;
+  border: 1px solid #363636;
+  border-radius: 8px;
+}
+.tracker-hearts > strong {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 14px;
+}
+.tracker-hearts svg {
+  color: #f34f60;
+}
+.tracker-hearts > div {
+  display: grid;
+  gap: 5px;
+  font-size: 11px;
+  color: #cecece;
+}
+.tracker-hearts progress {
+  appearance: none;
+  border: 0;
+  height: 4px;
+  width: 64px;
+  border-radius: 3px;
+  overflow: hidden;
+  background: #393939;
+}
+.tracker-hearts progress::-webkit-progress-bar {
+  background: #393939;
+}
+.tracker-hearts progress::-webkit-progress-value {
+  background: #f34f60;
+  border-radius: 3px;
+}
+.tracker-hearts progress::-moz-progress-bar {
+  background: #f34f60;
+  border-radius: 3px;
+}
+.tracker-repair-dialog > p {
+  line-height: 1.6;
+}
+.tracker-repair-explanation {
+  color: #bcbcbc;
+}
+.tracker-repair-dialog .tracker-repair-error {
+  color: #efb57c;
 }
 .tracker-error {
   margin: 12px 0;

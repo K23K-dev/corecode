@@ -132,7 +132,7 @@ beforeEach(() => {
   mocks.createPool.mockReturnValue(pool);
   mocks.readCatalog.mockResolvedValue(CATALOG);
   mocks.readState.mockResolvedValue(STATE);
-  mocks.readActivity.mockImplementation(async (_pool, timeZone) => ({ timeZone, days: [] }));
+  mocks.readActivity.mockResolvedValue({ timeZone: 'America/New_York', days: [] });
   mocks.writeState.mockResolvedValue({ ...STATE, revision: 5 });
   mocks.readExecutionProblem.mockResolvedValue(EXECUTION);
   mocks.hostedExecute.mockResolvedValue({ cases: [], stdout: '', durationMs: 1 });
