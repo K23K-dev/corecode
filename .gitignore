@@ -3,6 +3,7 @@ node_modules/
 dist/
 build/
 .next/
+.vercel/
 .venv/
 __pycache__/
 *.pyc

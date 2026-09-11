@@ -1,0 +1,365 @@
+import http, { type IncomingHttpHeaders, type Server } from 'node:http';
+import { readFile } from 'node:fs/promises';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+
+const mocks = vi.hoisted(() => ({
+  attachPool: vi.fn(),
+  createPool: vi.fn(),
+  initializeDatabase: vi.fn(),
+  readCatalog: vi.fn(),
+  readState: vi.fn(),
+  readActivity: vi.fn(),
+  writeState: vi.fn(),
+  readExecutionProblem: vi.fn(),
+  localExecute: vi.fn(),
+  hostedExecute: vi.fn(),
+}));
+
+vi.mock('@vercel/functions', () => ({ attachDatabasePool: mocks.attachPool }));
+vi.mock('pg', () => ({
+  Pool: class {
+    constructor() {
+      throw new Error('Offline deployment tests must never open a database connection.');
+    }
+  },
+}));
+vi.mock('../server/repository.mjs', async (importOriginal) => ({
+  ...(await importOriginal<Record<string, unknown>>()),
+  makePool: mocks.createPool,
+  initializeDatabase: mocks.initializeDatabase,
+  readCatalog: mocks.readCatalog,
+  readState: mocks.readState,
+  readActivity: mocks.readActivity,
+  writeState: mocks.writeState,
+  readExecutionProblem: mocks.readExecutionProblem,
+}));
+vi.mock('../runner/execution.mjs', () => ({ executeProblem: mocks.localExecute }));
+
+const serverModule = '../server/vercel.mjs';
+const { readVercelConfiguration, createVercelHandler } = (await import(serverModule)) as {
+  readVercelConfiguration(environment: Record<string, string | undefined>): {
+    appOrigin: string;
+    connectionString: string;
+  };
+  createVercelHandler(options: {
+    environment: Record<string, string | undefined>;
+    executeCode: typeof mocks.hostedExecute;
+  }): http.RequestListener & { listen: unknown };
+};
+const ORIGIN = 'https://practice.example.com';
+// Synthetic fixture only. No real connection or remote call is used in this suite.
+const CONNECTION =
+  'postgresql://test:test@ep-fixture-pooler.us-east-1.aws.neon.tech/db?sslmode=require';
+const ENVIRONMENT = {
+  VERCEL: '1',
+  VERCEL_ENV: 'production',
+  VERCEL_AUTHENTICATION_CONFIRMED: '1',
+  VERCEL_PROJECT_PRODUCTION_URL: 'practice.example.com',
+  POSTGRES_URL: CONNECTION,
+};
+const CATALOG = { version: 'a'.repeat(64), decks: [], exercises: [] };
+const STATE = { revision: 4, progress: { version: 1, exercises: {} }, stars: [] };
+const EXECUTION = { id: 'fixture', version: 'b'.repeat(64), gradingSpec: { private: true } };
+const pool = { query: vi.fn(), end: vi.fn() };
+let servers: Server[];
+
+async function serve(overrides: Record<string, string | undefined> = {}) {
+  const handler = createVercelHandler({
+    environment: { ...ENVIRONMENT, ...overrides },
+    executeCode: mocks.hostedExecute,
+  });
+  const server = http.createServer(handler);
+  servers.push(server);
+  await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
+  return server;
+}
+
+function request(
+  server: Server,
+  method: string,
+  path: string,
+  body?: string,
+  overrides: Record<string, string | undefined> = {},
+) {
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Missing test server port.');
+  const headers: Record<string, string> = { Host: 'practice.example.com' };
+  if (body !== undefined) {
+    Object.assign(headers, {
+      Origin: ORIGIN,
+      'Content-Type': 'application/json',
+      'X-Code-Practice-Client': '1',
+      'Content-Length': String(Buffer.byteLength(body)),
+    });
+  }
+  for (const [key, value] of Object.entries(overrides)) {
+    if (value === undefined) delete headers[key];
+    else headers[key] = value;
+  }
+  return new Promise<{ status: number; headers: IncomingHttpHeaders; body: unknown; text: string }>(
+    (resolve, reject) => {
+      const outgoing = http.request(
+        { host: '127.0.0.1', port: address.port, method, path, headers, agent: false },
+        (response) => {
+          const chunks: Buffer[] = [];
+          response.on('data', (chunk) => chunks.push(chunk));
+          response.on('error', reject);
+          response.on('end', () => {
+            const text = Buffer.concat(chunks).toString('utf8');
+            try {
+              resolve({
+                status: response.statusCode!,
+                headers: response.headers,
+                body: text ? JSON.parse(text) : undefined,
+                text,
+              });
+            } catch (error) {
+              reject(error);
+            }
+          });
+        },
+      );
+      outgoing.setTimeout(5_000, () => outgoing.destroy(new Error('Offline test timed out.')));
+      outgoing.on('error', reject);
+      outgoing.end(body);
+    },
+  );
+}
+
+beforeEach(() => {
+  vi.resetAllMocks();
+  servers = [];
+  mocks.createPool.mockReturnValue(pool);
+  mocks.readCatalog.mockResolvedValue(CATALOG);
+  mocks.readState.mockResolvedValue(STATE);
+  mocks.readActivity.mockImplementation(async (_pool, timeZone) => ({ timeZone, days: [] }));
+  mocks.writeState.mockResolvedValue({ ...STATE, revision: 5 });
+  mocks.readExecutionProblem.mockResolvedValue(EXECUTION);
+  mocks.hostedExecute.mockResolvedValue({ cases: [], stdout: '', durationMs: 1 });
+  pool.query.mockResolvedValue({ rows: [] });
+});
+
+afterEach(async () => {
+  await Promise.all(
+    servers.map((server) => new Promise<void>((resolve) => server.close(() => resolve()))),
+  );
+});
+
+describe('private Vercel deployment configuration', () => {
+  it('uses the platform production domain and allows an explicit canonical origin', () => {
+    expect(readVercelConfiguration(ENVIRONMENT)).toEqual({
+      appOrigin: ORIGIN,
+      connectionString: CONNECTION,
+    });
+    expect(
+      readVercelConfiguration({ ...ENVIRONMENT, APP_ORIGIN: 'https://custom.example.com' })
+        .appOrigin,
+    ).toBe('https://custom.example.com');
+  });
+
+  it.each([
+    { VERCEL: undefined },
+    { VERCEL_ENV: 'preview' },
+    { VERCEL_ENV: 'development' },
+    { VERCEL_AUTHENTICATION_CONFIRMED: undefined },
+    { VERCEL_AUTHENTICATION_CONFIRMED: 'true' },
+    { POSTGRES_URL: undefined },
+    { POSTGRES_URL: 'postgresql://test:test@localhost/db?sslmode=require' },
+    { VERCEL_PROJECT_PRODUCTION_URL: undefined },
+  ])('refuses incomplete or nonproduction configuration: %j', (overrides) => {
+    expect(() => readVercelConfiguration({ ...ENVIRONMENT, ...overrides })).toThrow();
+    expect(mocks.createPool).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    'http://practice.example.com',
+    'https://practice.example.com/',
+    'https://practice.example.com/path',
+    'https://practice.example.com?query=1',
+    'https://practice.example.com#fragment',
+    'https://practice.example.com:8443',
+    'https://user:password@practice.example.com',
+    'https://localhost',
+    'https://app.localhost',
+    'https://app.local',
+    'https://127.0.0.1',
+    'https://[::1]',
+    '',
+  ])('rejects noncanonical or local production origins: %s', (APP_ORIGIN) => {
+    expect(() => readVercelConfiguration({ ...ENVIRONMENT, APP_ORIGIN })).toThrow();
+  });
+
+  it('does not fall back to arbitrary preview domain variables', () => {
+    expect(() =>
+      readVercelConfiguration({
+        ...ENVIRONMENT,
+        VERCEL_PROJECT_PRODUCTION_URL: undefined,
+        VERCEL_URL: 'preview.example.com',
+        VERCEL_BRANCH_URL: 'branch.example.com',
+      }),
+    ).toThrow();
+  });
+});
+
+describe('Vercel handler with an offline repository', () => {
+  it('does not create a pool at module/handler creation and reuses it across requests', async () => {
+    const server = await serve();
+    expect(mocks.createPool).not.toHaveBeenCalled();
+    for (const [path, expected] of [
+      ['/api/catalog', CATALOG],
+      ['/api/state', STATE],
+      ['/api/activity?timeZone=America%2FNew_York', { timeZone: 'America/New_York', days: [] }],
+    ] as const) {
+      const reply = await request(server, 'GET', path);
+      expect(reply.status).toBe(200);
+      expect(reply.body).toEqual(expected);
+      expect(reply.headers['content-type']).toBe('application/json; charset=utf-8');
+      expect(reply.headers['cache-control']).toBe('no-store');
+      expect(reply.headers['x-content-type-options']).toBe('nosniff');
+      expect(reply.headers['access-control-allow-origin']).toBeUndefined();
+    }
+    expect(mocks.createPool).toHaveBeenCalledExactlyOnceWith(CONNECTION);
+    expect(mocks.attachPool).toHaveBeenCalledExactlyOnceWith(pool);
+    expect(mocks.initializeDatabase).not.toHaveBeenCalled();
+    expect(pool.query).not.toHaveBeenCalled();
+  });
+
+  it('exports an Express application so Vercel does not install its own body/response helpers', () => {
+    const handler = createVercelHandler({
+      environment: ENVIRONMENT,
+      executeCode: mocks.hostedExecute,
+    });
+    expect(typeof handler.listen).toBe('function');
+    expect(mocks.createPool).not.toHaveBeenCalled();
+  });
+
+  it('returns fixed JSON setup errors without disclosing configuration or opening storage', async () => {
+    const server = await serve({ VERCEL_AUTHENTICATION_CONFIRMED: undefined });
+    const reply = await request(server, 'GET', '/api/state', undefined, {
+      'X-Vercel-Authenticated': '1',
+      'X-Vercel-SSO-User': 'forged@example.com',
+    });
+    expect(reply.status).toBe(503);
+    expect(reply.body).toMatchObject({ code: 'deployment_not_configured' });
+    expect(reply.headers['cache-control']).toBe('no-store');
+    expect(reply.text).not.toContain(CONNECTION);
+    expect(mocks.createPool).not.toHaveBeenCalled();
+    expect(mocks.readState).not.toHaveBeenCalled();
+  });
+
+  it('blocks preview requests even if someone accidentally adds production credentials there', async () => {
+    const server = await serve({ VERCEL_ENV: 'preview' });
+    expect((await request(server, 'GET', '/api/catalog')).status).toBe(503);
+    expect(mocks.createPool).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { Host: 'attacker.example.com' },
+    { Host: 'practice.example.com.attacker.com' },
+    { Host: 'preview.example.com', 'X-Forwarded-Host': 'practice.example.com' },
+    { Origin: 'https://attacker.example.com' },
+    { Origin: 'null' },
+    { 'Sec-Fetch-Site': 'cross-site' },
+    { 'Sec-Fetch-Site': 'same-site' },
+  ])('rejects untrusted request authorities/origins: %j', async (headers) => {
+    const server = await serve();
+    const reply = await request(server, 'GET', '/api/state', undefined, headers);
+    expect(reply.status).toBe(403);
+    expect(mocks.readState).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    { Origin: undefined },
+    { Origin: 'https://attacker.example.com' },
+    { 'X-Code-Practice-Client': undefined },
+  ])('requires same-origin JSON client requests before saving: %j', async (headers) => {
+    const server = await serve();
+    expect((await request(server, 'PUT', '/api/state', '{}', headers)).status).toBe(403);
+    expect(mocks.writeState).not.toHaveBeenCalled();
+  });
+
+  it('retains strict raw JSON parsing and does not pass invalid data to storage', async () => {
+    const server = await serve();
+    expect((await request(server, 'PUT', '/api/state', '{')).status).toBe(400);
+    expect(
+      (await request(server, 'PUT', '/api/state', '{}', { 'Content-Type': 'text/plain' })).status,
+    ).toBe(415);
+    expect(mocks.writeState).not.toHaveBeenCalled();
+  });
+
+  it('sends same-origin saves to the existing repository without adding another profile', async () => {
+    const server = await serve();
+    const update = { expectedRevision: 4, progress: STATE.progress, stars: [] };
+    const reply = await request(server, 'PUT', '/api/state', JSON.stringify(update));
+    expect(reply.status).toBe(200);
+    expect(mocks.writeState).toHaveBeenCalledExactlyOnceWith(pool, update);
+  });
+
+  it('injects the hosted executor with the private versioned spec and does not call Docker', async () => {
+    const server = await serve();
+    const submission = { problemId: EXECUTION.id, code: '# inert test fixture' };
+    const reply = await request(server, 'POST', '/api/run', JSON.stringify(submission));
+    expect(reply.status).toBe(200);
+    expect(mocks.hostedExecute).toHaveBeenCalledExactlyOnceWith(submission, EXECUTION, {
+      signal: expect.any(AbortSignal),
+    });
+    expect(mocks.localExecute).not.toHaveBeenCalled();
+  });
+
+  it('returns JSON for unknown API routes and wrong methods, never the frontend document', async () => {
+    const server = await serve();
+    expect((await request(server, 'GET', '/api/not-found')).body).toMatchObject({
+      code: 'not_found',
+    });
+    expect((await request(server, 'DELETE', '/api/state')).status).toBe(405);
+    expect((await request(server, 'GET', '/api/state/')).status).toBe(404);
+  });
+});
+
+describe('Vite + Vercel deployment routing', () => {
+  it('excludes private configuration and local artifacts from direct CLI uploads', async () => {
+    // Vercel CLI source uploads do not read .gitignore. These exclusions must
+    // stay in the deployment-specific ignore file even when Git also ignores them.
+    const rules = (await readFile(new URL('../.vercelignore', import.meta.url), 'utf8'))
+      .split(/\r?\n/)
+      .map((rule) => rule.trim().replace(/\/$/, ''))
+      .filter((rule) => rule && !rule.startsWith('#'));
+    expect(rules).toEqual(
+      expect.arrayContaining([
+        '.env',
+        '.env.*',
+        '.local',
+        'docs',
+        'AGENTS.md',
+        '.git',
+        '.vercel',
+        'node_modules',
+        'dist',
+        'build',
+        '*.log',
+        'playwright-report',
+        'test-results',
+      ]),
+    );
+    // The remote build still type-checks tests, and API imports require both
+    // server and runner source. Do not hide these to reduce the upload size.
+    for (const source of ['api', 'server', 'runner', 'src', 'tests']) {
+      expect(rules).not.toContain(source);
+    }
+    expect(rules.some((rule) => rule.startsWith('!'))).toBe(false);
+  });
+
+  it('deploys an API function before the SPA fallback without publishing source directories', async () => {
+    const config = JSON.parse(await readFile(new URL('../vercel.json', import.meta.url), 'utf8'));
+    expect(config.framework).toBe('vite');
+    expect(config.outputDirectory).toBe('dist');
+    expect(config.buildCommand).toBe('npm run build');
+    expect(config.functions['api/index.mjs']).toEqual({ maxDuration: 300 });
+    expect(config.rewrites).toEqual([
+      { source: '/api/:path*', destination: '/api/index' },
+      { source: '/((?!api(?:/|$)).*)', destination: '/index.html' },
+    ]);
+    expect(config.builds).toBeUndefined();
+    expect(config.env).toBeUndefined();
+  });
+});

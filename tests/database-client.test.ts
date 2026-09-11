@@ -227,6 +227,125 @@ describe('database hydration and catalog', () => {
   });
 });
 
+describe('deployment response errors', () => {
+  it.each(['text/plain', 'text/html', 'application/json'])(
+    'identifies a missing API from a 404 %s response without displaying its body',
+    async (contentType) => {
+      const response = new Response('private upstream details', {
+        status: 404,
+        headers: { 'Content-Type': contentType },
+      });
+      const read = vi.spyOn(response, 'text');
+      await expect(loadCatalog(vi.fn(async () => response) as typeof fetch)).rejects.toThrow(
+        'The practice API could not be found (HTTP 404). Check that the backend is included in this deployment.',
+      );
+      expect(read).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each([
+    [401, 'text/html'],
+    [403, 'application/json'],
+  ])('explains access protection for HTTP %i with %s', async (status, contentType) => {
+    const response = new Response('private sign-in details', {
+      status: Number(status),
+      headers: { 'Content-Type': String(contentType) },
+    });
+    await expect(loadCatalog(vi.fn(async () => response) as typeof fetch)).rejects.toThrow(
+      'Access to the practice API was denied. Sign in with an account that has access, then reload the page.',
+    );
+  });
+
+  it('explains a followed sign-in redirect instead of treating its page as database data', async () => {
+    const response = new Response('<html>Sign in</html>', {
+      headers: { 'Content-Type': 'text/html' },
+    });
+    Object.defineProperty(response, 'redirected', { value: true });
+    await expect(loadCatalog(vi.fn(async () => response) as typeof fetch)).rejects.toThrow(
+      'The practice API redirected to another page. Reload the website and sign in if prompted.',
+    );
+  });
+
+  it.each(['text/html', 'text/plain', ''])(
+    'identifies non-JSON successful responses with content type "%s" as a routing issue',
+    async (contentType) => {
+      const response = new Response('<html>App shell or sign-in page</html>', {
+        headers: { 'Content-Type': contentType },
+      });
+      await expect(loadCatalog(vi.fn(async () => response) as typeof fetch)).rejects.toThrow(
+        'The practice API did not return JSON data. Check the deployment’s API routing, then retry.',
+      );
+    },
+  );
+
+  it.each(['text/plain', 'application/json'])(
+    'identifies upstream HTTP failures before malformed %s response data',
+    async (contentType) => {
+      const response = new Response('private connection details', {
+        status: 502,
+        headers: { 'Content-Type': contentType },
+      });
+      await expect(loadCatalog(vi.fn(async () => response) as typeof fetch)).rejects.toThrow(
+        'The practice API is unavailable (HTTP 502). Please retry in a moment.',
+      );
+    },
+  );
+
+  it('distinguishes malformed JSON data from missing deployment routes', async () => {
+    const response = new Response('{', { headers: { 'Content-Type': 'application/json' } });
+    await expect(loadCatalog(vi.fn(async () => response) as typeof fetch)).rejects.toThrow(
+      'The practice API returned malformed JSON. Please retry in a moment.',
+    );
+  });
+
+  it.each(['application/json; charset=utf-8', 'Application/JSON', 'application/vnd.practice+json'])(
+    'accepts JSON data with content type %s',
+    async (contentType) => {
+      const catalog = { version: VERSION, decks: [], exercises: [] };
+      const response = new Response(JSON.stringify(catalog), {
+        headers: { 'Content-Type': contentType },
+      });
+      expect(await loadCatalog(vi.fn(async () => response) as typeof fetch)).toEqual(catalog);
+    },
+  );
+
+  it('leaves browser backups untouched when protected state hydration fails', async () => {
+    const original = { [PROGRESS_STORAGE_KEY]: JSON.stringify(progress('local draft')) };
+    const saved = storage(original);
+    const fetcher = vi.fn(async () => new Response('Sign in', { status: 401 }));
+    await expect(ProgressClient.open({ fetch: fetcher, storage: saved })).rejects.toThrow(
+      /Access to the practice API was denied/,
+    );
+    expect(fetcher).toHaveBeenCalledTimes(1);
+    expect(Object.fromEntries(saved.values)).toEqual(original);
+  });
+
+  it('retains pending drafts and stars when deployment access expires during a save', async () => {
+    const api = database();
+    const saved = storage();
+    const client = await open(api, saved);
+    api.fetch.mockImplementationOnce(async () => new Response('Sign in', { status: 401 }));
+    edit(client, 'pending draft');
+    client.setStar('problem', true);
+    await client.flush();
+    expect(client.getSnapshot().status).toBe('offline');
+    expect(client.getSnapshot().warning).toMatch(/Sign in with an account that has access/);
+    expect(client.getSnapshot().progress.exercises.problem.draft).toBe('pending draft');
+    expect(client.getSnapshot().stars).toEqual(['problem']);
+    expect(api.state.progress).toEqual(empty());
+    expect(api.state.stars).toEqual([]);
+    client.dispose();
+
+    const recovered = await open(api, saved);
+    expect(recovered.getSnapshot().progress.exercises.problem.draft).toBe('pending draft');
+    expect(recovered.getSnapshot().stars).toEqual(['problem']);
+    await recovered.flush();
+    expect(recovered.getSnapshot().status).toBe('saved');
+    expect(api.state.progress.exercises.problem.draft).toBe('pending draft');
+    expect(api.state.stars).toEqual(['problem']);
+  });
+});
+
 describe('one-time non-destructive browser migration', () => {
   it('preserves unknown IDs and original strings, archives all legacy attempts, and never re-stars on reload', async () => {
     const legacy: ProgressData = {

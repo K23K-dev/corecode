@@ -166,7 +166,7 @@ function createRunnerPayload(body, problem, spec) {
   return serialized;
 }
 
-function parseRunnerResult(chunks, spec, body) {
+export function parseRunnerResult(chunks, spec, body) {
   try {
     const result = JSON.parse(Buffer.concat(chunks).toString('utf8'));
     if (
@@ -190,6 +190,13 @@ function parseRunnerResult(chunks, spec, body) {
       'invalid_runner_result',
     );
   }
+}
+
+/** Both execution adapters use the same private spec and protocol validation. */
+export function prepareExecution(body, problem) {
+  validateExecutionRequest(body, problem);
+  const spec = readGradingSpec(problem);
+  return { spec, payload: createRunnerPayload(body, problem, spec) };
 }
 
 function runContainer({ body, spec, payload, name, signal, timeoutMs }) {
@@ -291,9 +298,7 @@ export async function executeProblem(
   problem,
   { signal, timeoutMs = DEFAULT_TIMEOUT_MS } = {},
 ) {
-  validateExecutionRequest(body, problem);
-  const spec = readGradingSpec(problem);
-  const payload = createRunnerPayload(body, problem, spec);
+  const { spec, payload } = prepareExecution(body, problem);
   if (activeRuns >= MAX_ACTIVE_RUNS) {
     throw new RequestError(
       'Two runs are already active. Wait for one to finish.',

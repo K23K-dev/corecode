@@ -130,13 +130,39 @@ async function jsonRequest(fetcher: typeof fetch, path: string, init?: RequestIn
     signal: AbortSignal.timeout(8_000),
     cache: 'no-store',
   });
+  if (response.status === 401 || response.status === 403)
+    throw new Error(
+      'Access to the practice API was denied. Sign in with an account that has access, then reload the page.',
+    );
+  if (response.status === 404)
+    throw new Error(
+      'The practice API could not be found (HTTP 404). Check that the backend is included in this deployment.',
+    );
+  const contentType = response.headers.get('Content-Type')?.split(';')[0].trim() ?? '';
+  const isJson = /^application\/(?:[\w.-]+\+)?json$/i.test(contentType);
+  const unavailable = `The practice API is unavailable (HTTP ${response.status}). Please retry in a moment.`;
+  if (!isJson) {
+    if (response.redirected)
+      throw new Error(
+        'The practice API redirected to another page. Reload the website and sign in if prompted.',
+      );
+    if (!response.ok) throw new Error(unavailable);
+    throw new Error(
+      'The practice API did not return JSON data. Check the deployment’s API routing, then retry.',
+    );
+  }
   const text = await response.text();
-  if (text.length > MAX_BACKUP_BYTES * 2) throw new Error('The database response is too large.');
+  if (text.length > MAX_BACKUP_BYTES * 2)
+    throw new Error('The practice API response is too large.');
   let body: unknown;
   try {
     body = JSON.parse(text);
   } catch {
-    throw new Error('The database returned an invalid response.');
+    throw new Error(
+      response.ok
+        ? 'The practice API returned malformed JSON. Please retry in a moment.'
+        : unavailable,
+    );
   }
   return { response, body };
 }

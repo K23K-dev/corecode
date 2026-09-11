@@ -1,0 +1,18 @@
+# Vercel CLI uploads do not use .gitignore.
+.env
+.env.*
+.local
+docs
+AGENTS.md
+.git/
+.vercel/
+node_modules/
+dist
+build
+.next
+.venv
+__pycache__
+*.pyc
+*.log
+playwright-report
+test-results

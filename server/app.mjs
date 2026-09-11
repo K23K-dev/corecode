@@ -1,11 +1,16 @@
 import express from 'express';
-import { protectRequest } from './middleware/request-protection.mjs';
+import { protectHostedRequest, protectRequest } from './middleware/request-protection.mjs';
 import { errorHandler, notFound } from './middleware/errors.mjs';
 import { practiceRoutes } from './routes/practice.mjs';
 import { executionRoutes } from './routes/execution.mjs';
 
 /** HTTP composition only: database ownership and listening belong to index.mjs. */
-export function createApp({ pool, appOrigin = 'http://127.0.0.1:5173' }) {
+export function createApp({
+  pool,
+  appOrigin = 'http://127.0.0.1:5173',
+  hosted = false,
+  executeCode,
+}) {
   const app = express();
   app.disable('x-powered-by');
   app.disable('etag');
@@ -21,9 +26,9 @@ export function createApp({ pool, appOrigin = 'http://127.0.0.1:5173' }) {
     response.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
     next();
   });
-  app.use(protectRequest(appOrigin));
+  app.use(hosted ? protectHostedRequest(appOrigin) : protectRequest(appOrigin));
   app.use(practiceRoutes(pool));
-  app.use(executionRoutes(pool));
+  app.use(executionRoutes(pool, executeCode));
   app.use(notFound);
   app.use(errorHandler);
   return app;

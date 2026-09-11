@@ -10,10 +10,10 @@
     "runner:setup": "node runner/setup.mjs",
     "test": "vitest run --config tests/vitest.config.ts",
     "test:db": "node tests/run-database.mjs",
-    "test:execution": "node --test tests/runner/execution.test.mjs",
+    "test:execution": "node --test tests/runner/execution.test.mjs tests/runner/sandbox.test.mjs tests/runner/sandbox-setup.test.mjs tests/runner/catalog-sandbox.test.mjs",
     "test:e2e": "playwright test --config tests/playwright.config.ts",
-    "format": "prettier --write \"{src,server,runner,tests}/**/*.{ts,tsx,js,mjs,css}\" \"*.ts\" index.html package.json tsconfig.json",
-    "format:check": "prettier --check \"{src,server,runner,tests}/**/*.{ts,tsx,js,mjs,css}\" \"*.ts\" index.html package.json tsconfig.json",
+    "format": "prettier --write \"{api,src,server,runner,tests}/**/*.{ts,tsx,js,mjs,css}\" \"*.ts\" index.html package.json tsconfig.json vercel.json",
+    "format:check": "prettier --check \"{api,src,server,runner,tests}/**/*.{ts,tsx,js,mjs,css}\" \"*.ts\" index.html package.json tsconfig.json vercel.json",
     "check": "npm run format:check && npm run build && npm test && npm run test:execution && npm run test:db && npm run test:e2e"
   },
   "dependencies": {
@@ -30,6 +30,8 @@
     "@fontsource/geist": "5.3.0",
     "@lezer/highlight": "^1.2.3",
     "@uiw/react-codemirror": "4.25.11",
+    "@vercel/functions": "3.9.7",
+    "@vercel/sandbox": "3.2.2",
     "express": "5.2.1",
     "lucide-react": "1.42.0",
     "pg": "^8.23.0",
