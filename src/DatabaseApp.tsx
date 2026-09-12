@@ -1,11 +1,40 @@
-import { useEffect, useState } from 'react';
-import App from './App';
+'use client';
+
+import { createContext, useContext, useEffect, useState, type ReactNode } from 'react';
+import { useRouter } from 'next/navigation';
+import { LibraryStateProvider } from './components/PracticeLibrary';
 import { loadCatalog, ProgressClient, type Catalog } from './lib/database-client';
 
-export default function DatabaseApp() {
-  const [loaded, setLoaded] = useState<{ catalog: Catalog; client: ProgressClient } | null>(null);
+type Database = { catalog: Catalog; client: ProgressClient };
+const DatabaseContext = createContext<Database | null>(null);
+
+export function useDatabase() {
+  const database = useContext(DatabaseContext);
+  if (!database) throw new Error('Practice must be opened inside DatabaseApp.');
+  return database;
+}
+
+export default function DatabaseApp({ children }: { children: ReactNode }) {
+  const [loaded, setLoaded] = useState<Database | null>(null);
   const [error, setError] = useState('');
   const [attempt, setAttempt] = useState(0);
+  const router = useRouter();
+  useEffect(() => {
+    // Preserve bookmarks from the original hash-based app.
+    function openBookmark() {
+      if (!window.location.hash) return;
+      let id = '';
+      try {
+        id = decodeURIComponent(window.location.hash.slice(1));
+      } catch {
+        // Malformed legacy bookmarks return to the library.
+      }
+      router.replace(id && id !== 'library' ? `/problems/${encodeURIComponent(id)}` : '/');
+    }
+    openBookmark();
+    window.addEventListener('hashchange', openBookmark);
+    return () => window.removeEventListener('hashchange', openBookmark);
+  }, [router]);
   useEffect(() => {
     let active = true;
     let client: ProgressClient | undefined;
@@ -30,7 +59,12 @@ export default function DatabaseApp() {
       client?.dispose();
     };
   }, [attempt]);
-  if (loaded) return <App catalog={loaded.catalog} client={loaded.client} />;
+  if (loaded)
+    return (
+      <DatabaseContext.Provider value={loaded}>
+        <LibraryStateProvider>{children}</LibraryStateProvider>
+      </DatabaseContext.Provider>
+    );
   return (
     <div className="app library-view">
       <header className="topbar">

@@ -22,7 +22,18 @@ async function stop(exitCode = 0) {
   if (stopping) return stopping;
   stopping = (async () => {
     if (child && child.exitCode === null && child.signalCode === null) {
-      child.kill('SIGTERM');
+      if (process.platform === 'win32') {
+        // Next dev owns a worker process. Stop only this test's process tree,
+        // otherwise Windows can leave its listener attached to the test schema.
+        await new Promise((resolve, reject) => {
+          const kill = spawn('taskkill', ['/pid', String(child.pid), '/T', '/F'], {
+            windowsHide: true,
+            stdio: 'ignore',
+          });
+          kill.once('error', reject);
+          kill.once('exit', resolve);
+        });
+      } else child.kill('SIGTERM');
       await childExited;
     }
     await cleanupRuntime();
@@ -42,17 +53,21 @@ try {
     await initializeDatabase(isolated.connectionString);
     await copyCatalogToTestDatabase(isolated.connectionString);
     await mkdir(runtimeDirectory, { recursive: true });
-    child = spawn(process.execPath, ['server/start.mjs'], {
-      cwd: projectRoot,
-      windowsHide: true,
-      stdio: 'inherit',
-      // Only this child uses the isolated connection as its application database.
-      // The test controller retains normal POSTGRES_URL for separation guards.
-      env: {
-        ...process.env,
-        POSTGRES_URL: isolated.connectionString,
+    child = spawn(
+      process.execPath,
+      ['node_modules/next/dist/bin/next', 'dev', '--hostname', '127.0.0.1', '--port', '5173'],
+      {
+        cwd: projectRoot,
+        windowsHide: true,
+        stdio: 'inherit',
+        // Only this child uses the isolated connection as its application database.
+        // The test controller retains normal POSTGRES_URL for separation guards.
+        env: {
+          ...process.env,
+          POSTGRES_URL: isolated.connectionString,
+        },
       },
-    });
+    );
     childExited = new Promise((resolve) => {
       child.once('exit', (code) => resolve(code ?? 1));
       child.once('error', () => resolve(1));

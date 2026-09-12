@@ -148,44 +148,6 @@ export function createSandboxCatalogPlan(rows, options) {
         code: alternative.code,
       })),
     ];
-    if (problem.runtime === 'browser-python') {
-      const name = spec.entryPoint;
-      if (!safeEntryPoint(name) || name !== problem.entryPoint) {
-        throw Error('Browser-Python native compatibility needs a matching callable entry point.');
-      }
-      const publicCase = problem.cases?.find((test) =>
-        spec.cases.some((privateCase) => privateCase.args === test.args),
-      );
-      if (!publicCase || typeof publicCase.args !== 'string') {
-        throw Error('Browser-Python custom verification needs a matching public argument fixture.');
-      }
-      // Keep authored globals (including Solution references) intact in a separate namespace,
-      // while exposing its helpers and bound method through the legacy standalone lookup.
-      // This source is interpreted only inside the restricted container.
-      const legacyCode =
-        `__cp_legacy_namespace = {'__name__': 'solution'}\n` +
-        `exec(${JSON.stringify(problem.referenceCode)}, __cp_legacy_namespace)\n` +
-        `__cp_legacy_class = __cp_legacy_namespace.get('Solution')\n` +
-        `__cp_legacy_callable = (getattr(__cp_legacy_class(), ${JSON.stringify(name)}) ` +
-        `if isinstance(__cp_legacy_class, type) else __cp_legacy_namespace[${JSON.stringify(name)}])\n` +
-        `globals().update({key: value for key, value in __cp_legacy_namespace.items() if key != 'Solution'})\n` +
-        `def ${name}(*args, **kwargs):\n    return __cp_legacy_callable(*args, **kwargs)\n`;
-      variants.push(
-        { variant: 'legacy-reference', mode: 'submit', code: legacyCode },
-        {
-          variant: 'public-custom',
-          mode: 'custom',
-          code: problem.referenceCode,
-          customArgs: publicCase.args,
-        },
-        {
-          variant: 'legacy-public-custom',
-          mode: 'custom',
-          code: legacyCode,
-          customArgs: publicCase.args,
-        },
-      );
-    }
     variants.push({ variant: 'starter', mode: 'submit', code: problem.starterCode });
     const wrong = wrongAnswerVariant(problem, spec);
     const family = problem.runtime;
@@ -207,7 +169,7 @@ export function createSandboxCatalogPlan(rows, options) {
   return { entries, jobs, totalProblems: rows.length, matchingProblems: matching.length };
 }
 
-function classifyCatalogResult(result, variant, expectedCases, customReference) {
+function classifyCatalogResult(result, variant, expectedCases) {
   const cases = result?.cases;
   if (
     result?.error ||
@@ -217,17 +179,6 @@ function classifyCatalogResult(result, variant, expectedCases, customReference) 
     result.durationMs < 0
   )
     return 'invalid-runner-result';
-  if (variant.mode === 'custom') {
-    const test = cases[0];
-    return test &&
-      test.passed === null &&
-      !test.error &&
-      test.expected === '' &&
-      typeof test.actual === 'string' &&
-      (variant.variant === 'public-custom' || test.actual === customReference?.cases[0]?.actual)
-      ? null
-      : 'custom-parity-mismatch';
-  }
   if (cases.some((test) => typeof test?.passed !== 'boolean')) return 'invalid-runner-result';
   if (
     cases.some(
@@ -286,7 +237,6 @@ export async function verifySandboxCatalog(
     nativeBrowserProblems: plan.entries.filter(
       ({ problem }) => problem.runtime === 'browser-python',
     ).length,
-    browserEngineVerified: false,
     results: [],
   };
   report(
@@ -323,7 +273,6 @@ export async function verifySandboxCatalog(
   async function worker() {
     while (!stopped && cursor < plan.entries.length) {
       const entry = plan.entries[cursor++];
-      let customReference;
       for (const variant of entry.variants) {
         if (stopped) break;
         let result;
@@ -337,7 +286,6 @@ export async function verifySandboxCatalog(
                 problemVersion: entry.problem.version,
                 mode: variant.mode,
                 code: variant.code,
-                ...(variant.mode === 'custom' ? { customArgs: variant.customArgs } : {}),
               },
               entry.executionProblem,
               { snapshotId: options.snapshotId },
@@ -348,8 +296,7 @@ export async function verifySandboxCatalog(
           failure = classifyCatalogResult(
             result,
             variant,
-            variant.mode === 'custom' ? 1 : entry.executionProblem.gradingSpec.cases.length,
-            customReference,
+            entry.executionProblem.gradingSpec.cases.length,
           );
         } catch (error) {
           failure = 'execution-or-cleanup-error';
@@ -369,7 +316,6 @@ export async function verifySandboxCatalog(
           )
             executionCode = error.code;
         }
-        if (!failure && variant.variant === 'public-custom') customReference = result;
         const outcome = {
           id: entry.problem.id,
           version: entry.problem.version,

@@ -32,8 +32,8 @@ export function validateNeonConnectionString(value, variableName = 'POSTGRES_URL
   return url;
 }
 
-export function getDatabaseConnection() {
-  const connectionString = process.env.POSTGRES_URL;
+export function getDatabaseConnection(environment = process.env) {
+  const connectionString = environment.POSTGRES_URL;
   validateNeonConnectionString(connectionString);
   return { connectionString: connectionString.trim() };
 }

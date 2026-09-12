@@ -23,8 +23,6 @@ export type RunResult = {
   error?: string;
 };
 
-export type RunnerStage = 'loading' | 'running';
-
 /** Every exercise uses the private API and its configured isolated execution adapter. */
 export class PracticeRunner {
   private request: AbortController | null = null;
@@ -33,12 +31,10 @@ export class PracticeRunner {
     code: string,
     mode: 'example' | 'submit' | 'custom',
     customArgs: string,
-    onStage: (stage: RunnerStage) => void,
   ): Promise<RunResult> {
     const localApp = globalThis.location?.origin === 'http://127.0.0.1:5173';
     const controller = new AbortController();
     this.request = controller;
-    onStage('running');
     // Hosted requests include the database lookup, fresh VM startup, and bounded cleanup.
     const timer = setTimeout(() => controller.abort(), localApp ? 25_000 : 165_000);
     try {
@@ -72,8 +68,5 @@ export class PracticeRunner {
   }
   cancel() {
     this.request?.abort();
-  }
-  dispose() {
-    this.cancel();
   }
 }

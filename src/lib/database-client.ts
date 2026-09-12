@@ -600,7 +600,8 @@ export class ProgressClient {
     this.pending.solved[id] = combineSolved(this.pending.solved[id], { value, at, id: this.id() });
   }
   restore(progress: ProgressData) {
-    const restored = parseProgressBackup(JSON.stringify(progress));
+    // The import dialog validates the backup; keep an independent copy when merging it.
+    const restored = structuredClone(progress);
     const at = this.now();
     this.updateProgress((previous) => ({
       version: 1,

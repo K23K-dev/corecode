@@ -52,17 +52,9 @@ function plainObject(value: unknown, label: string): Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     fail(`${label} must be a plain object.`);
   }
-  const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null) {
-    fail(`${label} must be a plain object.`);
-  }
-  for (const key of Reflect.ownKeys(value)) {
-    if (typeof key !== 'string' || FORBIDDEN_KEYS.has(key)) {
+  for (const key of Object.keys(value)) {
+    if (FORBIDDEN_KEYS.has(key)) {
       fail(`${label} contains an unsafe object key.`);
-    }
-    const descriptor = Object.getOwnPropertyDescriptor(value, key);
-    if (!descriptor || !descriptor.enumerable || !('value' in descriptor)) {
-      fail(`${label} must contain only ordinary JSON properties.`);
     }
   }
   return value as Record<string, unknown>;

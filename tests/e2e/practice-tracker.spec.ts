@@ -75,7 +75,7 @@ test('tracker uses all catalog difficulty totals and saved solved state, indepen
     [JSON.stringify(progress)],
   );
   await mockActivity(page, []);
-  await page.goto('/#library');
+  await page.goto('/');
   const tracker = page.getByRole('complementary', { name: 'Practice tracker' });
   await expect(tracker).toBeVisible();
   await expect(tracker.getByText('Five solved days in a streak earn one heart.')).toHaveCount(0);
@@ -117,7 +117,7 @@ test('calendar uses the Eastern practice day, navigates months, and distinguishe
     requestedQueries.push(new URL(route.request().url()).search);
     return route.fulfill({ json: activitySnapshot(days) });
   });
-  await page.goto('/#library');
+  await page.goto('/');
   const tracker = page.getByRole('complementary', { name: 'Practice tracker' });
   await expect(tracker.getByTestId('current-streak')).toHaveText('2 days');
   await expect(tracker.getByTestId('best-streak')).toHaveText('5 days');
@@ -186,7 +186,7 @@ for (const boundary of [
       requests++;
       return route.fulfill({ json: activitySnapshot([], [], serverNow) });
     });
-    await page.goto('/#library');
+    await page.goto('/');
     const tracker = page.getByRole('complementary', { name: 'Practice tracker' });
     await expect(tracker.getByTestId('tracker-reset-countdown')).toHaveText('00:00:02 left');
     await expect(tracker.getByTestId('tracker-day')).toHaveText(
@@ -235,7 +235,7 @@ test('repair confirmation spends one heart, preserves accepted counts, and survi
     repairs = [missedDate];
     return route.fulfill({ json: activitySnapshot(repairableDays, repairs) });
   });
-  await page.goto('/#library');
+  await page.goto('/');
   const tracker = page.getByRole('complementary', { name: 'Practice tracker' });
   const missed = tracker.locator(`[data-date="${missedDate}"]`);
   await expect(missed).toHaveClass(/is-missed-day/);
@@ -283,7 +283,7 @@ test('only missed days since practice began offer repair and no hearts means no 
     posts++;
     return route.fulfill({ status: 409, json: { error: 'No hearts available.' } });
   });
-  await page.goto('/#library');
+  await page.goto('/');
   const tracker = page.getByRole('complementary', { name: 'Practice tracker' });
   await expect(tracker.getByTestId('tracker-hearts')).toHaveText('0');
   const beforePractice = tracker.locator('[data-date="2026-09-01"]');
@@ -342,7 +342,7 @@ test('a failed repair leaves the day and heart unchanged and permits a safe retr
     repairs = [missedDate];
     return route.fulfill({ json: activitySnapshot(repairableDays, repairs) });
   });
-  await page.goto('/#library');
+  await page.goto('/');
   const tracker = page.getByRole('complementary', { name: 'Practice tracker' });
   const missed = tracker.locator(`[data-date="${missedDate}"]`);
   await expect(tracker.getByTestId('tracker-hearts')).toHaveText('1');
@@ -379,7 +379,7 @@ test('a lost last-heart repair response is reconciled by the next activity read 
     repairs = [missedDate];
     return route.fulfill({ status: 503, json: { error: 'Response unavailable' } });
   });
-  await page.goto('/#library');
+  await page.goto('/');
   const tracker = page.getByRole('complementary', { name: 'Practice tracker' });
   await expect(tracker.getByTestId('tracker-hearts')).toHaveText('1');
   const missed = tracker.locator(`[data-date="${missedDate}"]`);
@@ -426,7 +426,7 @@ test('pending repairs cannot double-submit and late activity reads cannot undo a
     repairs = [missedDate];
     await route.fulfill({ json: activitySnapshot(repairableDays, repairs) });
   });
-  await page.goto('/#library');
+  await page.goto('/');
   const tracker = page.getByRole('complementary', { name: 'Practice tracker' });
   await expect(tracker.getByTestId('tracker-hearts')).toHaveText('1');
   holdRead = true;
@@ -468,7 +468,7 @@ for (const failure of ['unavailable API', 'invalid activity response']) {
           : route.fulfill({ json: { days: [{ date: today, count: 'not a count' }] } });
       return route.fulfill({ json: activitySnapshot([{ date: today, count: 2 }]) });
     });
-    await page.goto('/#library');
+    await page.goto('/');
     const tracker = page.getByRole('complementary', { name: 'Practice tracker' });
     await expect(tracker.getByRole('alert')).toContainText('Activity could not be loaded.');
     await expect(tracker.getByTestId('current-streak')).toHaveText('—');
@@ -491,7 +491,7 @@ for (const width of [1440, 390]) {
   test(`tracker and library fit together without overflow at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 1000 });
     await mockActivity(page, []);
-    await page.goto('/#library');
+    await page.goto('/');
     const library = page.getByRole('main', { name: 'Practice library' });
     const tracker = library.getByRole('complementary', { name: 'Practice tracker' });
     await expect(tracker.getByTestId('current-streak')).toHaveText('0 days');
@@ -539,7 +539,7 @@ test('accepted activity refreshes only after the real isolated submission is ack
   page.on('request', (request) => {
     if (new URL(request.url()).pathname === '/api/activity') activityRequests++;
   });
-  await page.goto('/#library');
+  await page.goto('/');
   const tracker = page.getByRole('complementary', { name: 'Practice tracker' });
   await expect(tracker.getByTestId('current-streak')).toHaveText('0 days');
   await page.getByRole('searchbox', { name: 'Search problems', exact: true }).fill(problem.title);
@@ -633,7 +633,7 @@ test('same-day focus refreshes archived activity even when the latest twenty att
   );
   let days = [{ date: today, count: 20 }];
   await page.route(activityPath, (route) => route.fulfill({ json: activitySnapshot(days) }));
-  await page.goto('/#library');
+  await page.goto('/');
   const tracker = page.getByRole('complementary', { name: 'Practice tracker' });
   await expect(tracker.getByTestId('current-streak')).toHaveText('1 day');
   await expect(tracker.locator(`button[data-date="${today}"]`)).toHaveAttribute('data-count', '20');
@@ -689,7 +689,7 @@ test('activity retry works while an unrelated draft remains offline and unacknow
       ? route.fulfill({ json: activitySnapshot([{ date: today, count: 1 }]) })
       : route.fulfill({ status: 503, json: { error: 'Temporarily unavailable' } }),
   );
-  await page.goto(`/#${problem.id}`);
+  await page.goto(`/problems/${problem.id}`);
   await expect(page.locator('.app')).toHaveAttribute('data-save-state', 'saved');
   const editor = page.getByRole('textbox', { name: 'Python solution editor' });
   await editor.click();

@@ -24,7 +24,12 @@ export interface Exercise {
   example?: string;
   topic?: string;
   requirements?: string[];
-  examples?: { input: string; output: string }[];
+  examples?: {
+    input: string;
+    output: string;
+    inputLabel?: string;
+    outputLabel?: string;
+  }[];
   entryPoint?: string;
   customInput?: string;
   cases?: TestCase[];

@@ -10,6 +10,8 @@ __pycache__/
 playwright-report/
 test-results/
 *.log
+*.tsbuildinfo
+next-env.d.ts
 
 # Private configuration, database, and source snapshots
 .env

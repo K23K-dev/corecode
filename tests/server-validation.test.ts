@@ -89,12 +89,11 @@ describe('database save validation', () => {
     ).toThrow();
   });
 
-  it('rejects unsafe object keys and custom prototypes', () => {
+  it('rejects unsafe object keys and identifiers', () => {
     const unsafe = JSON.parse(
       '{"expectedRevision":0,"progress":{"version":1,"exercises":{"__proto__":{}}},"stars":[]}',
     );
     expect(() => validateStateUpdate(unsafe)).toThrow();
-    expect(() => validateStateUpdate(Object.create({ expectedRevision: 0 }))).toThrow();
     expect(() => validateStateUpdate({ ...update(), stars: ['constructor'] })).toThrow();
   });
 

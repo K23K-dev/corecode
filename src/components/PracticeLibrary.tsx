@@ -1,4 +1,13 @@
-import { memo, useCallback, useId, useMemo, useState } from 'react';
+import {
+  createContext,
+  memo,
+  useCallback,
+  useContext,
+  useId,
+  useMemo,
+  useState,
+  type ReactNode,
+} from 'react';
 import {
   ArrowDown,
   ArrowUp,
@@ -19,11 +28,52 @@ import {
 import type { Exercise } from '../lib/exercises';
 import type { Catalog } from '../lib/database-client';
 import type { ProgressData } from '../lib/progress';
-import PracticeTracker from './PracticeTracker';
+import PracticeTracker, { useCalendarView } from './PracticeTracker';
 import '../library-page.css';
 
 const difficultyOrder = ['Easy', 'Medium', 'Hard'];
 type ProblemSort = { key: 'title' | 'difficulty'; direction: 'ascending' | 'descending' } | null;
+const LibraryContext = createContext<ReturnType<typeof useLibraryState> | null>(null);
+
+function useLibraryState() {
+  const [query, setQuery] = useState('');
+  const [deckId, setDeckId] = useState('all');
+  const [difficulty, setDifficulty] = useState('all');
+  const [completion, setCompletion] = useState('all');
+  const [starredOnly, setStarredOnly] = useState(false);
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  const [view, setView] = useState<'decks' | 'all'>('decks');
+  const [sort, setSort] = useState<ProblemSort>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const calendar = useCalendarView();
+  return {
+    query,
+    setQuery,
+    deckId,
+    setDeckId,
+    difficulty,
+    setDifficulty,
+    completion,
+    setCompletion,
+    starredOnly,
+    setStarredOnly,
+    filtersOpen,
+    setFiltersOpen,
+    view,
+    setView,
+    sort,
+    setSort,
+    expanded,
+    setExpanded,
+    calendar,
+  };
+}
+
+// Keep library filters and expanded decks when navigating to a problem and back.
+export function LibraryStateProvider({ children }: { children: ReactNode }) {
+  const state = useLibraryState();
+  return <LibraryContext.Provider value={state}>{children}</LibraryContext.Provider>;
+}
 const MemoizedPracticeTracker = memo(PracticeTracker);
 
 // Opening a deck changes only its disclosure shell, not its problem rows.
@@ -182,15 +232,29 @@ export default function PracticeLibrary({
   const difficulties = difficultyOrder.filter((value) =>
     exercises.some((exercise) => exercise.difficulty === value),
   );
-  const [query, setQuery] = useState('');
-  const [deckId, setDeckId] = useState('all');
-  const [difficulty, setDifficulty] = useState('all');
-  const [completion, setCompletion] = useState('all');
-  const [starredOnly, setStarredOnly] = useState(false);
-  const [filtersOpen, setFiltersOpen] = useState(false);
-  const [view, setView] = useState<'decks' | 'all'>('decks');
-  const [sort, setSort] = useState<ProblemSort>(null);
-  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
+  const library = useContext(LibraryContext);
+  if (!library) throw new Error('PracticeLibrary requires LibraryStateProvider.');
+  const {
+    query,
+    setQuery,
+    deckId,
+    setDeckId,
+    difficulty,
+    setDifficulty,
+    completion,
+    setCompletion,
+    starredOnly,
+    setStarredOnly,
+    filtersOpen,
+    setFiltersOpen,
+    view,
+    setView,
+    sort,
+    setSort,
+    expanded,
+    setExpanded,
+    calendar,
+  } = library;
   const instanceId = useId();
   const isSolved = useCallback(
     (exercise: Exercise) => Boolean(progress.exercises[exercise.id]?.solved),
@@ -575,7 +639,12 @@ export default function PracticeLibrary({
             </div>
           )}
         </div>
-        <MemoizedPracticeTracker exercises={exercises} progress={progress} saveState={saveState} />
+        <MemoizedPracticeTracker
+          exercises={exercises}
+          progress={progress}
+          saveState={saveState}
+          calendar={calendar}
+        />
       </div>
     </main>
   );

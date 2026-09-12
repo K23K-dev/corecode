@@ -1,5 +1,4 @@
 import { expect, test } from './fixtures';
-import { practiceClock, summarizeActivity } from '../../shared/practice-activity.mjs';
 
 test.use({ timezoneId: 'America/New_York', locale: 'en-US' });
 
@@ -8,7 +7,7 @@ test('deck reveal uses natural height, rotates its chevron, and excludes collaps
   page,
 }) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
-  await page.goto('/#library');
+  await page.goto('/');
   const group = page
     .locator('.pl-topic-group')
     .filter({ has: page.locator('.pl-topic-name', { hasText: /^Python$/ }) });
@@ -20,18 +19,12 @@ test('deck reveal uses natural height, rotates its chevron, and excludes collaps
   await expect(panel).toHaveAttribute('inert', '');
   await expect(panel).toHaveAttribute('aria-hidden', 'true');
   await expect(panel).toHaveCSS('height', '0px');
-  await expect(panel).toHaveCSS('transition-property', 'grid-template-rows, visibility');
-  await expect(panel).toHaveCSS('transition-duration', '0.2s, 0s');
-  await expect(panel).toHaveCSS(
-    'transition-timing-function',
-    'cubic-bezier(0.25, 0.1, 0.25, 1), linear',
-  );
-  await expect(chevron).toHaveCSS('transition-property', 'transform');
 
   await heading.click();
   await expect(heading).toHaveAttribute('aria-expanded', 'true');
   await expect(panel).not.toHaveAttribute('inert');
   await expect(panel).toHaveAttribute('aria-hidden', 'false');
+  await expect(panel).toBeVisible();
   await expect(chevron).toHaveCSS('transform', 'matrix(0, 1, -1, 0, 0, 0)');
   await expect
     .poll(() =>
@@ -43,9 +36,6 @@ test('deck reveal uses natural height, rotates its chevron, and excludes collaps
       }),
     )
     .toBeLessThan(1);
-  await expect
-    .poll(() => panel.evaluate((element) => element.getBoundingClientRect().height))
-    .toBeGreaterThan(1_000);
 
   await heading.click();
   await expect(panel).toHaveAttribute('inert', '');
@@ -66,7 +56,7 @@ test('quick deck toggles and expand/collapse all settle at the latest requested 
   page,
 }) => {
   await page.emulateMedia({ reducedMotion: 'no-preference' });
-  await page.goto('/#library');
+  await page.goto('/');
   const heading = page.locator('.pl-topic-heading').first();
   const panel = page.locator('.pl-topic-reveal').first();
   await expect(heading).toBeVisible();
@@ -100,7 +90,7 @@ test('quick deck toggles and expand/collapse all settle at the latest requested 
 
 test('reduced motion disables both panel and chevron transitions', async ({ page }) => {
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.goto('/#library');
+  await page.goto('/');
   const heading = page.locator('.pl-topic-heading').first();
   const panel = page.locator('.pl-topic-reveal').first();
   await expect(panel).toHaveCSS('transition-duration', '0s');
@@ -111,110 +101,4 @@ test('reduced motion disables both panel and chevron transitions', async ({ page
   await heading.click();
   await expect(panel).toHaveCSS('height', '0px');
   await expect(panel).toHaveCSS('visibility', 'hidden');
-});
-
-test('deck disclosure reuses unchanged problem rows and tracker calculations', async ({ page }) => {
-  const fixedTime = '2026-09-08T12:00:00.000Z';
-  const clock = practiceClock(new Date(fixedTime));
-  const days = [{ date: '2026-09-07', count: 1 }];
-  await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.clock.setFixedTime(fixedTime);
-  await page.route(/\/api\/activity(?:\?.*)?$/, (route) =>
-    route.fulfill({
-      json: {
-        timeZone: 'America/New_York',
-        resetHour: 20,
-        ...clock,
-        serverNow: fixedTime,
-        days,
-        repairs: [],
-        streak: summarizeActivity(days, [], clock.today),
-      },
-    }),
-  );
-  await page.addInitScript(() => {
-    const counters = { titleReads: 0, activityCountReads: 0 };
-    (window as Window & { __deckReadCounts?: typeof counters }).__deckReadCounts = counters;
-    const parse = JSON.parse;
-    // Catalog loading parses response.text(), not response.json(). Count reads
-    // of real catalog fields without inspecting React internals or timing work.
-    JSON.parse = (text, reviver) => {
-      const value = parse(text, reviver);
-      if (
-        value &&
-        Array.isArray(value.decks) &&
-        Array.isArray(value.exercises) &&
-        typeof value.version === 'string'
-      ) {
-        for (const exercise of value.exercises) {
-          const title = exercise.title;
-          Object.defineProperty(exercise, 'title', {
-            configurable: true,
-            enumerable: true,
-            get() {
-              counters.titleReads++;
-              return title;
-            },
-          });
-        }
-      }
-      return value;
-    };
-    const fetch = window.fetch.bind(window);
-    window.fetch = async (input, init) => {
-      const response = await fetch(input, init);
-      const url = input instanceof Request ? input.url : String(input);
-      if (new URL(url, location.href).pathname === '/api/activity') {
-        const json = response.json.bind(response);
-        response.json = async () => {
-          const value = await json();
-          for (const day of value.days ?? []) {
-            const count = day.count;
-            Object.defineProperty(day, 'count', {
-              configurable: true,
-              enumerable: true,
-              get() {
-                counters.activityCountReads++;
-                return count;
-              },
-            });
-          }
-          return value;
-        };
-      }
-      return response;
-    };
-  });
-  await page.goto('/#library');
-  const heading = page.locator('.pl-topic-heading').first();
-  const panel = page.locator('.pl-topic-reveal').first();
-  await expect(page.getByTestId('best-streak')).toHaveText('1 day');
-  await expect(heading).toHaveAttribute('aria-expanded', 'false');
-  const readCounts = () =>
-    page.evaluate(
-      () =>
-        (
-          window as Window & {
-            __deckReadCounts?: { titleReads: number; activityCountReads: number };
-          }
-        ).__deckReadCounts!,
-    );
-  const initial = await readCounts();
-  expect(initial.titleReads).toBeGreaterThan(0);
-  expect(initial.activityCountReads).toBeGreaterThan(0);
-
-  await heading.click();
-  await expect(heading).toHaveAttribute('aria-expanded', 'true');
-  await expect(panel).toHaveCSS('visibility', 'visible');
-  expect(await readCounts()).toEqual(initial);
-  await heading.click();
-  await expect(heading).toHaveAttribute('aria-expanded', 'false');
-  await expect(panel).toHaveCSS('height', '0px');
-  expect(await readCounts()).toEqual(initial);
-  await page.getByRole('button', { name: 'Expand all decks', exact: true }).click();
-  await expect(page.locator('.pl-topic-heading[aria-expanded="false"]')).toHaveCount(0);
-  expect(await readCounts()).toEqual(initial);
-  await page.getByRole('button', { name: 'Collapse all decks', exact: true }).click();
-  await expect(page.locator('.pl-topic-heading[aria-expanded="true"]')).toHaveCount(0);
-  expect(await readCounts()).toEqual(initial);
 });

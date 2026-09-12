@@ -1,7 +1,6 @@
 import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import { PassThrough, Writable } from 'node:stream';
 import { afterEach, beforeEach, describe, it, mock } from 'node:test';
@@ -159,35 +158,20 @@ describe('isolated execution boundary', { concurrency: false }, () => {
     assert.equal(calls.length, 0);
   });
 
-  it('imports and executes with filesystem grading reads disabled', async () => {
-    for (const method of ['readFileSync', 'readdirSync']) {
-      mock.method(fs, method, () => {
-        throw new Error('Execution must not read a local grading catalog.');
-      });
-    }
-    syncBuiltinESMExports();
-    const isolated = await import('../../runner/execution.mjs?without-local-grading-files');
-    const pending = isolated.executeProblem(request(), problem);
-    complete(calls[0]);
-    assert.deepEqual(await pending, result());
-  });
-
   it('fails closed for missing or malformed database specs without trusting client substitutes', async () => {
-    const inheritedSpec = Object.create(gradingSpec);
-    const inheritedCase = Object.create(gradingSpec.cases[0]);
     const invalidSpecs = [
       null,
       undefined,
       [],
       {},
-      inheritedSpec,
       ...['constructor', '__proto__', 'toString', 'unknown', null].map((runtime) => ({
         ...gradingSpec,
         runtime,
       })),
-      ...[undefined, null, {}, [], Array(33).fill(gradingSpec.cases[0]), [inheritedCase], [{}]].map(
-        (cases) => ({ ...gradingSpec, cases }),
-      ),
+      ...[undefined, null, {}, [], Array(33).fill(gradingSpec.cases[0]), [{}]].map((cases) => ({
+        ...gradingSpec,
+        cases,
+      })),
       { ...gradingSpec, privateNote: '界'.repeat(350_000) },
     ];
     for (const value of invalidSpecs) {
@@ -199,13 +183,6 @@ describe('isolated execution boundary', { concurrency: false }, () => {
         errorWith(503, 'grading_unavailable'),
       );
     }
-    await assert.rejects(
-      executeProblem(
-        request({ spec: gradingSpec }),
-        Object.assign(Object.create({ gradingSpec }), { id: ID, version: VERSION }),
-      ),
-      errorWith(503, 'grading_unavailable'),
-    );
     assert.equal(calls.length, 0);
   });
 

@@ -99,16 +99,6 @@ function tabControls(props: ReturnType<typeof panelProps>) {
 }
 
 describe('ProblemPanel', () => {
-  it('gives all three problem tabs consistent 16px icons', () => {
-    const html = renderPanel();
-    const tabs = html.match(/<button role="tab"[\s\S]*?<\/button>/g)!;
-
-    expect(tabs).toHaveLength(3);
-    for (const tab of tabs) {
-      expect(tab).toMatch(/<svg[^>]*width="16"[^>]*height="16"/);
-    }
-  });
-
   it('shows the question, examples, requirements, and solved status without exposing reference code', () => {
     const html = renderPanel({ ...panelProps(), solved: true });
 
@@ -119,6 +109,8 @@ describe('ProblemPanel', () => {
     expect(html).toContain('Strings');
     expect(html).toContain('Return normalized text.');
     expect(html).toContain('Example 1:');
+    expect(html).toContain('<span>Input:</span>');
+    expect(html).toContain('<span>Output:</span>');
     expect(html).toContain('&#x27; Hello &#x27;');
     expect(html).toContain('&#x27;hello&#x27;');
     expect(html).toContain('Preserve interior spaces.');
@@ -133,6 +125,41 @@ describe('ProblemPanel', () => {
 
     expect(html).not.toContain('aria-label="Solved"');
     expect(html).not.toContain('topic-pill');
+  });
+
+  it('shows authored scenario labels and concrete file states without empty requirements', () => {
+    const html = renderPanel({
+      ...panelProps(),
+      exercise: {
+        ...exercise,
+        requirements: [],
+        examples: [
+          {
+            inputLabel: 'Before',
+            input: 'draft.txt contains "Hello".',
+            outputLabel: 'After',
+            output: 'final.txt contains "Hello". draft.txt no longer exists.',
+          },
+          {
+            inputLabel: 'Setup',
+            input: 'app.log contains <error>.',
+            outputLabel: 'Terminal output',
+            output: '<error>',
+          },
+        ],
+      },
+    });
+
+    expect(html).toContain('example-code example-scenario');
+    expect(html).toContain('<span>Before:</span>');
+    expect(html).toContain('<span>After:</span>');
+    expect(html).toContain('final.txt contains &quot;Hello&quot;. draft.txt no longer exists.');
+    expect(html).toContain('<span>Setup:</span>');
+    expect(html).toContain('<span>Terminal output:</span>');
+    expect(html).toContain('&lt;error&gt;');
+    expect(html).not.toContain('<span>Input:</span>');
+    expect(html).not.toContain('<span>Output:</span>');
+    expect(html).not.toContain('Requirements:');
   });
 
   it('shows the reference and authored alternatives as read-only code', () => {
@@ -165,13 +192,14 @@ describe('ProblemPanel', () => {
     expect(html).toContain('<h1>Your submissions</h1>');
     expect(html).toContain('No submissions yet');
     expect(html).toContain('Your last 20 submissions for this exercise will appear here.');
+    expect(html).not.toContain('<small>');
     expect(html).not.toContain('submission-row');
   });
 
   it('shows newest submissions first with status/count labels without mutating saved order', () => {
     const html = renderPanel({ ...panelProps('history'), attempts });
 
-    expect(html).toContain('<small>3</small>');
+    expect(html.match(/<small>3<\/small>/g)).toHaveLength(1);
     expect(html.match(/class="submission-row"/g)).toHaveLength(3);
     expect(html).toContain('Accepted');
     expect(html).toContain('Not accepted');

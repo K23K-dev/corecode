@@ -13,7 +13,7 @@ test.describe('Row interaction', () => {
   ];
 
   async function openTable(page: Page, view: LibraryView) {
-    await page.goto('/#library');
+    await page.goto('/');
     const library = page.getByRole('main', { name: 'Practice library' });
     await expect(library).toBeVisible();
     if (view === 'expanded deck') {
@@ -61,7 +61,7 @@ test.describe('Row interaction', () => {
   }
 
   async function expectQuestion(page: Page, problem: (typeof problems)[number]) {
-    await expect(page).toHaveURL(new RegExp(`#${problem.id}$`));
+    await expect(page).toHaveURL(new RegExp(`/problems/${problem.id}$`));
     await expect(page.getByRole('heading', { name: problem.title, exact: true })).toBeVisible();
     await expect(page.getByRole('tab', { name: 'Question', exact: true })).toHaveAttribute(
       'aria-selected',
@@ -153,7 +153,7 @@ test.describe('Row interaction', () => {
         await expect(completion).toHaveAccessibleName(`Mark ${problem.title} incomplete`);
         await expect(completion).toHaveAttribute('aria-pressed', 'true');
         await expect(row).toHaveClass(/is-solved/);
-        await expect(page).toHaveURL(/#library$/);
+        await expect(page).toHaveURL('http://127.0.0.1:5173/');
         await expect(library).toBeVisible();
         await completion.click();
         await expect(completion).toHaveAttribute('aria-pressed', 'false');
@@ -162,10 +162,10 @@ test.describe('Row interaction', () => {
           await completion.focus();
           await page.keyboard.press(key);
           await expect(completion).toHaveAttribute('aria-pressed', 'true');
-          await expect(page).toHaveURL(/#library$/);
+          await expect(page).toHaveURL('http://127.0.0.1:5173/');
           await page.keyboard.press(key);
           await expect(completion).toHaveAttribute('aria-pressed', 'false');
-          await expect(page).toHaveURL(/#library$/);
+          await expect(page).toHaveURL('http://127.0.0.1:5173/');
         }
         await expect(page.locator('.app')).toHaveAttribute('data-save-state', 'saved');
 
@@ -174,7 +174,7 @@ test.describe('Row interaction', () => {
         await expect(unstar).toHaveAttribute('aria-pressed', 'true');
         await expect(completion).toHaveAttribute('aria-pressed', 'false');
         await expect(page.getByTestId('library-starred-count')).toHaveText('1');
-        await expect(page).toHaveURL(/#library$/);
+        await expect(page).toHaveURL('http://127.0.0.1:5173/');
         await expect(library).toBeVisible();
 
         // A nested SVG target must be recognized as part of its button too.
@@ -184,7 +184,7 @@ test.describe('Row interaction', () => {
         ).toHaveAttribute('aria-pressed', 'false');
         await expect(page.getByTestId('library-starred-count')).toHaveText('0');
         await expect(completion).toHaveAttribute('aria-pressed', 'false');
-        await expect(page).toHaveURL(/#library$/);
+        await expect(page).toHaveURL('http://127.0.0.1:5173/');
         await expect(library).toBeVisible();
         await expect(page.locator('.app')).toHaveAttribute('data-save-state', 'saved');
 
@@ -192,7 +192,7 @@ test.describe('Row interaction', () => {
           .getByRole('button', { name: `View solution for ${problem.title}`, exact: true })
           .locator('svg')
           .click();
-        await expect(page).toHaveURL(new RegExp(`#${problem.id}$`));
+        await expect(page).toHaveURL(`http://127.0.0.1:5173/problems/${problem.id}?tab=solution`);
         await expect(page.getByRole('tab', { name: 'Solution', exact: true })).toHaveAttribute(
           'aria-selected',
           'true',
@@ -279,7 +279,7 @@ test.describe('Manual completion', () => {
       const path = new URL(request.url()).pathname;
       if (path === '/api/run' || path === '/api/activity/repairs') unintendedRequests.push(path);
     });
-    await page.goto('/#library');
+    await page.goto('/');
     const library = await showAll(page);
     const tracker = page.getByRole('complementary', { name: 'Practice tracker' });
     const row = library.locator(`tr[data-problem-id="${problemId}"]`);
@@ -294,7 +294,7 @@ test.describe('Manual completion', () => {
     await expect(
       library.getByRole('heading', { name: 'No matching problems', exact: true }),
     ).toBeVisible();
-    await expect(page).toHaveURL(/#library$/);
+    await expect(page).toHaveURL('http://127.0.0.1:5173/');
     await expect(page.getByTestId('library-solved-count')).toHaveText(
       `1/${catalog.exercises.length}`,
     );
@@ -399,7 +399,7 @@ test.describe('Manual completion', () => {
       const path = new URL(request.url()).pathname;
       if (path === '/api/run' || path === '/api/activity/repairs') unintendedRequests.push(path);
     });
-    await page.goto('/#library');
+    await page.goto('/');
     const library = await showAll(page);
     const row = library.locator(`tr[data-problem-id="${problemId}"]`);
     const tracker = page.getByRole('complementary', { name: 'Practice tracker' });
@@ -422,7 +422,7 @@ test.describe('Manual completion', () => {
     await row
       .getByRole('button', { name: `Mark ${problem.title} incomplete`, exact: true })
       .click();
-    await expect(page).toHaveURL(/#library$/);
+    await expect(page).toHaveURL('http://127.0.0.1:5173/');
     await expect(row).not.toHaveClass(/is-solved/);
     await assertPreserved(false);
     await page.reload();

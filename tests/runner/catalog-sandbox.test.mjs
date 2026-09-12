@@ -24,11 +24,9 @@ function row(runtime = 'python', id = 'fixture-' + runtime) {
       id,
       version: 'a'.repeat(64),
       runtime,
-      entryPoint: 'answer',
       referenceCode: 'reference fixture source',
       starterCode: 'starter fixture source',
       solutionAlternatives: [{ title: 'Alternative', code: 'alternative fixture source' }],
-      cases: [{ name: 'Public example', args: '(1,)', expected: '2' }],
     },
     spec: {
       runtime: runtime === 'browser-python' ? 'python' : runtime,
@@ -44,9 +42,6 @@ function row(runtime = 'python', id = 'fixture-' + runtime) {
 
 const accepted = () => ({ cases: [{ passed: true, actual: '2' }], durationMs: 1, stdout: '' });
 function answer(body) {
-  if (body.mode === 'custom') {
-    return { cases: [{ passed: null, expected: '', actual: '2' }], durationMs: 1, stdout: '' };
-  }
   let error;
   if (body.code.includes('return object()'))
     error = 'AssertionError: Returned <object object at 0x1234>';
@@ -108,25 +103,14 @@ describe('opt-in hosted catalog verification', () => {
     assert.deepEqual(deps.calls, []);
   });
 
-  it('plans all variants, browser-native legacy/custom checks, and bounded runtime selection', async () => {
+  it('plans all grading variants for current and legacy runtime labels with bounded selection', async () => {
     const rows = [row(), row('browser-python'), row('javascript')];
     const plan = createSandboxCatalogPlan(rows, options());
-    assert.equal(plan.jobs, 15);
+    assert.equal(plan.jobs, 12);
     assert.deepEqual(
       plan.entries[1].variants.map((variant) => variant.variant),
-      [
-        'reference',
-        'alternative-1',
-        'legacy-reference',
-        'public-custom',
-        'legacy-public-custom',
-        'starter',
-        'wrong-answer',
-      ],
+      ['reference', 'alternative-1', 'starter', 'wrong-answer'],
     );
-    assert.match(plan.entries[1].variants[2].code, /exec\(.*__cp_legacy_namespace\)/);
-    assert.doesNotMatch(plan.entries[1].variants[2].code, /del Solution/);
-    assert.equal(plan.entries[1].variants[3].customArgs, '(1,)');
     const deps = dependencies(rows, async () =>
       assert.fail('Planning must not allocate a sandbox.'),
     );
@@ -137,7 +121,6 @@ describe('opt-in hosted catalog verification', () => {
     assert.equal(planned.status, 'planned');
     assert.equal(planned.selectedProblems, 1);
     assert.equal(planned.plannedJobs, 4);
-    assert.equal(planned.browserEngineVerified, false);
     assert.deepEqual(deps.calls, ['environment', 'read-only snapshot']);
   });
 
@@ -160,13 +143,12 @@ describe('opt-in hosted catalog verification', () => {
     });
     const report = await verifySandboxCatalog(options(), deps);
     assert.equal(report.status, 'passed');
-    assert.equal(report.completedJobs, 15);
-    assert.equal(report.passedJobs, 15);
+    assert.equal(report.completedJobs, 12);
+    assert.equal(report.passedJobs, 12);
     assert.equal(maximum, 2);
     assert.equal(active, 0);
-    assert.equal(requests.length, 15);
+    assert.equal(requests.length, 12);
     assert.equal(report.nativeBrowserProblems, 1);
-    assert.equal(report.browserEngineVerified, false);
     assert.equal(JSON.stringify(rows), before);
     assert.ok(!deps.output.join('\n').includes('private-grading-marker'));
     assert.ok(!deps.output.join('\n').includes('fixture source'));
@@ -197,12 +179,12 @@ describe('opt-in hosted catalog verification', () => {
     };
     const report = await verifySandboxCatalog(options(), deps);
     assert.equal(report.status, 'passed');
-    assert.equal(report.completedJobs, 15);
+    assert.equal(report.completedJobs, 12);
     assert.deepEqual(
       starts,
-      Array.from({ length: 15 }, (_, index) => index * 3_500),
+      Array.from({ length: 12 }, (_, index) => index * 3_500),
     );
-    assert.deepEqual(delays, Array(14).fill(3_500));
+    assert.deepEqual(delays, Array(11).fill(3_500));
     assert.equal(maximumWaiting, 1);
     assert.equal(maximum, 2);
     assert.equal(active, 0);
@@ -292,7 +274,7 @@ describe('opt-in hosted catalog verification', () => {
     }
   });
 
-  it('requires the deliberate wrong-value signature and compares ungraded custom output', async () => {
+  it('requires the deliberate wrong-value signature', async () => {
     const wrong = dependencies([row()], async (body) =>
       body.code.includes('return object()')
         ? { cases: [{ passed: false, error: 'SyntaxError: unrelated failure' }], durationMs: 1 }
@@ -300,23 +282,6 @@ describe('opt-in hosted catalog verification', () => {
     );
     const failedWrong = await verifySandboxCatalog(options(), wrong);
     assert.equal(failedWrong.results.at(-1).failure, 'wrong-answer-not-rejected');
-    const custom = dependencies([row('browser-python')], async (body) =>
-      body.mode === 'custom' && body.code.includes('__cp_legacy_namespace')
-        ? { cases: [{ passed: null, expected: '', actual: 'different' }], durationMs: 1 }
-        : answer(body),
-    );
-    const failedCustom = await verifySandboxCatalog(options(), custom);
-    assert.equal(failedCustom.results.at(-1).failure, 'custom-parity-mismatch');
-  });
-
-  it('compares actual custom results without demanding normalized expected representation', async () => {
-    const deps = dependencies([row('browser-python')], async (body) =>
-      body.mode === 'custom'
-        ? { cases: [{ passed: null, expected: '', actual: '0.30000000000000004' }], durationMs: 1 }
-        : answer(body),
-    );
-    const report = await verifySandboxCatalog(options(), deps);
-    assert.equal(report.status, 'passed');
   });
 
   it('never invents a wrong-value representative for scenario or backend cases', () => {

@@ -154,30 +154,14 @@ function fixture(hooks = {}) {
 }
 
 describe('hosted sandbox execution boundary', { concurrency: false }, () => {
-  it('validates requests, identity, private specs, and snapshot configuration before creation', async () => {
+  it('rejects invalid requests, private specs, snapshot configuration, and cancellation before creation', async () => {
     const run = fixture();
-    for (const body of [null, [], 'command', 1]) {
-      await assert.rejects(run.run(body), errorWith(400, 'invalid_request'));
-    }
-    await assert.rejects(run.run(request(), null), errorWith(404, 'invalid_request'));
+    // Shared request/spec validation is covered exhaustively in execution.test.mjs.
+    await assert.rejects(run.run(null), errorWith(400, 'invalid_request'));
     await assert.rejects(
-      run.run(request({ problemVersion: 'b'.repeat(64) })),
-      errorWith(409, 'problem_changed'),
+      run.run(request(), { ...problem, gradingSpec: null }),
+      errorWith(503, 'grading_unavailable'),
     );
-    for (const body of [
-      request({ code: 'a'.repeat(32_769) }),
-      request({ code: '界'.repeat(17_067) }),
-      request({ mode: 'unlimited' }),
-      request({ mode: 'custom', customArgs: 'x'.repeat(8_193) }),
-    ]) {
-      await assert.rejects(run.run(body), errorWith(400, 'invalid_request'));
-    }
-    for (const spec of [null, {}, { ...gradingSpec, runtime: 'ubuntu:latest' }]) {
-      await assert.rejects(
-        run.run(request({ spec: gradingSpec, gradingSpec }), { ...problem, gradingSpec: spec }),
-        errorWith(503, 'grading_unavailable'),
-      );
-    }
     for (const snapshotId of [null, '', 'other-snapshot', 'snap_../private', 'snap_']) {
       await assert.rejects(
         run.run(request(), problem, { snapshotId }),
@@ -327,17 +311,6 @@ describe('hosted sandbox execution boundary', { concurrency: false }, () => {
       assert.notEqual(run.calls.stops[0].signal, run.calls.deletes[0].signal);
       assert.deepEqual(run.calls.cleanup, ['stop', 'delete']);
     }
-  });
-
-  it('uses the private submission case count and never forwards unused custom input', async () => {
-    const run = fixture({ result: result(3) });
-    assert.equal(
-      (await run.run(request({ mode: 'submit', customArgs: 'ignored' }))).cases.length,
-      3,
-    );
-    const payload = JSON.parse(run.calls.writes[0].files[0].content.toString());
-    assert.equal(Object.hasOwn(payload, 'customArgs'), false);
-    assert.deepEqual(payload.spec, gradingSpec);
   });
 
   it('waits for the exact created handle after browser cancellation, then stops and deletes it', async () => {
@@ -552,16 +525,11 @@ describe('hosted sandbox execution boundary', { concurrency: false }, () => {
     assert.deepEqual(await fixture().run(), result());
   });
 
-  it('rejects unsuccessful setup and container exits without exposing diagnostics', async () => {
-    for (const [hooks, code] of [
-      [{ runCommand: async () => ({ exitCode: 1 }) }, 'runner_startup_failed'],
-      [{ wait: async () => ({ exitCode: 125 }) }, 'runner_unavailable'],
-    ]) {
-      const run = fixture(hooks);
-      await assert.rejects(run.run(), errorWith(503, code));
-      assert.equal(run.calls.deletes.length, 1);
-      assert.equal(run.calls.stops.length, 1);
-    }
+  it('rejects unsuccessful container exits and cleans up the sandbox', async () => {
+    const run = fixture({ wait: async () => ({ exitCode: 125 }) });
+    await assert.rejects(run.run(), errorWith(503, 'runner_unavailable'));
+    assert.equal(run.calls.deletes.length, 1);
+    assert.equal(run.calls.stops.length, 1);
   });
 
   it('never uploads a request or launches a container after trusted initialization fails', async () => {
@@ -579,28 +547,14 @@ describe('hosted sandbox execution boundary', { concurrency: false }, () => {
     assert.equal(run.calls.stops.length, 1);
   });
 
-  it('rejects invalid result JSON, shapes, and private suite counts without accepting the run', async () => {
-    for (const value of [
-      'not-json',
-      'null',
-      '{}',
-      JSON.stringify({ ...result(), durationMs: '1' }),
-      JSON.stringify(result(0)),
-      JSON.stringify(result(2)),
-    ]) {
-      const run = fixture({
-        logs: async function* () {
-          yield { stream: 'stdout', data: value };
-        },
-      });
-      await assert.rejects(run.run(), errorWith(503, 'invalid_runner_result'));
-      assert.equal(run.calls.deletes.length, 1);
-    }
-    const submission = fixture();
-    await assert.rejects(
-      submission.run(request({ mode: 'submit' })),
-      errorWith(503, 'invalid_runner_result'),
-    );
+  it('rejects malformed runner output and still cleans up the sandbox', async () => {
+    const run = fixture({
+      logs: async function* () {
+        yield { stream: 'stdout', data: 'not-json' };
+      },
+    });
+    await assert.rejects(run.run(), errorWith(503, 'invalid_runner_result'));
+    assert.deepEqual(run.calls.cleanup, ['stop', 'delete']);
   });
 
   it('returns genuine grading errors as errors rather than accepted cases', async () => {

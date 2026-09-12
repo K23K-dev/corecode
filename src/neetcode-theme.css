@@ -314,6 +314,25 @@ textarea {
 .example-code pre + span {
   margin-top: 0;
 }
+.example-scenario > div {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+.example-scenario > div > span {
+  font-family: var(--body-font);
+  font-weight: 600;
+}
+.example-scenario pre {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.example[data-runtime='sql'] pre {
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre;
+}
 .reference-code {
   margin-top: 16px;
 }

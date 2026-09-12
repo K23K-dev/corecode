@@ -19,19 +19,8 @@ function fail(message) {
 export function plainObject(value, label) {
   if (value === null || typeof value !== 'object' || Array.isArray(value))
     fail(`${label} must be a plain object.`);
-  const prototype = Object.getPrototypeOf(value);
-  if (prototype !== Object.prototype && prototype !== null)
-    fail(`${label} must be a plain object.`);
-  for (const key of Reflect.ownKeys(value)) {
-    const descriptor = Object.getOwnPropertyDescriptor(value, key);
-    if (
-      typeof key !== 'string' ||
-      FORBIDDEN.has(key) ||
-      !descriptor?.enumerable ||
-      !('value' in descriptor)
-    ) {
-      fail(`${label} contains an unsafe property.`);
-    }
+  for (const key of Object.keys(value)) {
+    if (FORBIDDEN.has(key)) fail(`${label} contains an unsafe property.`);
   }
   return value;
 }

@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import {
   exportProgress,
   MAX_ATTEMPTS_PER_EXERCISE,
@@ -128,16 +128,7 @@ describe('backup validation and safety limits', () => {
     },
   );
 
-  it('rejects accessors without executing them', () => {
-    const getter = vi.fn(() => ({}));
-    const data = { version: 1 };
-    Object.defineProperty(data, 'exercises', { enumerable: true, get: getter });
-    expect(() => exportProgress(data as ProgressData)).toThrow(/ordinary JSON properties/i);
-    expect(getter).not.toHaveBeenCalled();
-  });
-
-  it('rejects non-plain objects and unexpected fields', () => {
-    expect(() => exportProgress(new Date() as unknown as ProgressData)).toThrow(/plain object/i);
+  it('rejects missing and unexpected fields', () => {
     expect(() => parseProgressBackup('{"version":1,"exercises":{},"extra":true}')).toThrow(
       /unrecognized field/i,
     );

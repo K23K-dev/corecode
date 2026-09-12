@@ -57,6 +57,7 @@ test('homepage library shows authored problems and opens the workspace without l
   page,
 }) => {
   await page.goto('/');
+  await expect(page).toHaveTitle('Code Practice');
   const library = page.getByRole('main', { name: 'Practice library' });
   await expect(library).toBeVisible();
   await expect(library.getByRole('heading', { name: /^Code Practice/ })).toBeVisible();
@@ -94,11 +95,13 @@ test('homepage library shows authored problems and opens the workspace without l
     `${matching('Normalize text').length} of ${catalogCount} problems match your filters.`,
   );
   await library.getByRole('button', { name: 'Normalize text', exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`#${defaultId}$`));
+  await expect(page).toHaveURL(new RegExp(`/problems/${defaultId}$`));
   await expect(page.getByRole('heading', { name: 'Normalize text', exact: true })).toBeVisible();
   await setCode(page, reference);
+  await expect(page.locator('.app')).toHaveAttribute('data-save-state', 'saved');
+  await expect(page).toHaveTitle('Normalize text · Code Practice');
   await page.getByRole('link', { name: 'Code Practice library', exact: true }).click();
-  await expect(page).toHaveURL(/#library$/);
+  await expect(page).toHaveURL('http://127.0.0.1:5173/');
   await expect(library).toBeVisible();
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await library.getByRole('searchbox', { name: 'Search problems', exact: true }).fill('normalize');
@@ -108,8 +111,38 @@ test('homepage library shows authored problems and opens the workspace without l
   );
   await page.goBack();
   await expect(library).toBeVisible();
+  await expect(
+    library.getByRole('searchbox', { name: 'Search problems', exact: true }),
+  ).toHaveValue('normalize');
+  await expect(library.getByRole('button', { name: /^All problems/ })).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await page.goForward();
+  await expect(page).toHaveURL(new RegExp(`/problems/${defaultId}$`));
+  await expectCode(page, reference);
+  await page.reload();
+  await expect(page).toHaveURL(new RegExp(`/problems/${defaultId}$`));
+  await expect(page).toHaveTitle('Normalize text · Code Practice');
+  await expectCode(page, reference);
+  await page.goBack();
   await page.reload();
   await expect(library).toBeVisible();
+});
+
+test('legacy hash bookmarks resolve to real routes without losing their problem', async ({
+  page,
+}) => {
+  await page.goto(`/#${defaultId}`);
+  await expect(page).toHaveURL(new RegExp(`/problems/${defaultId}$`));
+  await expect(page.getByRole('heading', { name: 'Normalize text', exact: true })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole('heading', { name: 'Normalize text', exact: true })).toBeVisible();
+
+  await page.goto('/#library');
+  await expect(page).toHaveURL('http://127.0.0.1:5173/');
+  await expect(page.getByRole('main', { name: 'Practice library' })).toBeVisible();
+  await expect(page).toHaveTitle('Code Practice');
 });
 
 test('catalog decks expose their real counts and filter runnable problems', async ({ page }) => {
@@ -229,7 +262,7 @@ test('deck regrouping preserves previously saved drafts, solved status, and subm
 });
 
 test('homepage filters, empty states, saved stars, and filtered shuffle work', async ({ page }) => {
-  await page.goto('/#library');
+  await page.goto('/');
   const library = page.getByRole('main', { name: 'Practice library' });
   await library.getByRole('button', { name: /^All problems/ }).click();
   const table = library.getByRole('table', { name: 'All problems', exact: true });
@@ -268,7 +301,7 @@ test('homepage filters, empty states, saved stars, and filtered shuffle work', a
   await library.getByRole('checkbox', { name: 'Starred only', exact: true }).check();
   await expect(table.locator('tbody tr')).toHaveCount(1);
   await library.getByRole('button', { name: 'Shuffle filtered problems', exact: true }).click();
-  await expect(page).toHaveURL(new RegExp(`#${defaultId}$`));
+  await expect(page).toHaveURL(new RegExp(`/problems/${defaultId}$`));
   await expect(page.getByRole('heading', { name: 'Normalize text', exact: true })).toBeVisible();
 });
 
@@ -291,7 +324,7 @@ for (const acceptanceKey of ['Tab', 'Enter']) {
   test(`Python autocomplete suggests print while typing and accepts with ${acceptanceKey}`, async ({
     page,
   }) => {
-    await page.goto(`/#${defaultId}`);
+    await page.goto(`/problems/${defaultId}`);
     const editor = page.getByRole('textbox', { name: 'Python solution editor' });
     const prefix = 'def normalize_text(text):\n    ';
     await setCode(page, prefix);
@@ -312,7 +345,7 @@ for (const acceptanceKey of ['Tab', 'Enter']) {
 test('Python autocomplete uses current parameters and locals, with Escape and normal indentation intact', async ({
   page,
 }) => {
-  await page.goto(`/#${defaultId}`);
+  await page.goto(`/problems/${defaultId}`);
   const editor = page.getByRole('textbox', { name: 'Python solution editor' });
   const popup = page.locator('.cm-tooltip-autocomplete');
   const prefix = 'def normalize_text(text):\n    ';
@@ -339,7 +372,7 @@ test('Python autocomplete uses current parameters and locals, with Escape and no
 });
 
 test('Python autocomplete ranks common names and accepts fuzzy print matches', async ({ page }) => {
-  await page.goto(`/#${defaultId}`);
+  await page.goto(`/problems/${defaultId}`);
   const editor = page.getByRole('textbox', { name: 'Python solution editor' });
   const popup = page.locator('.cm-tooltip-autocomplete');
   const prefix = 'def normalize_text(text):\n    ';
@@ -357,7 +390,7 @@ test('Python autocomplete ranks common names and accepts fuzzy print matches', a
 test('autocomplete uses readable symbols and a blue selection without overflowing mobile', async ({
   page,
 }) => {
-  await page.goto(`/#${defaultId}`);
+  await page.goto(`/problems/${defaultId}`);
   const editor = page.getByRole('textbox', { name: 'Python solution editor' });
   const popup = page.locator('.cm-tooltip-autocomplete');
   const prefix = 'def normalize_text(text):\n    ';
@@ -415,7 +448,7 @@ test('autocomplete uses readable symbols and a blue selection without overflowin
 test('Python autocomplete does not expose names from the hidden reference solution', async ({
   page,
 }) => {
-  await page.goto('/#python-core-unique-in-order-01');
+  await page.goto('/problems/python-core-unique-in-order-01');
   const editor = page.getByRole('textbox', { name: 'Python solution editor' });
   await setCode(page, 'def unique_in_order(values):\n    ');
   await editor.pressSequentially('se', { delay: 35 });
@@ -437,7 +470,7 @@ test('Python autocomplete does not expose names from the hidden reference soluti
 test('running with pending or open autocomplete leaves no browser errors', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.stack ?? error.message));
-  await page.goto(`/#${defaultId}`);
+  await page.goto(`/problems/${defaultId}`);
   const editor = page.getByRole('textbox', { name: 'Python solution editor' });
   // The expression after return is unreachable, so typing a partial name still
   // leaves a valid solution while exercising the editor's lock/unlock lifecycle.
@@ -464,7 +497,7 @@ test('real run, full submit, failed case details, custom input, and persisted hi
 }) => {
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.stack ?? error.message));
-  await page.goto(`/#${defaultId}`);
+  await page.goto(`/problems/${defaultId}`);
   await expect(page.getByRole('heading', { name: 'Normalize text', exact: true })).toBeVisible();
   await expect(page.locator('.topbar-actions, .workspace-progress')).toHaveCount(0);
   await expect(page.getByRole('button', { name: 'My progress', exact: true })).toHaveCount(0);
@@ -539,7 +572,7 @@ test('real run, full submit, failed case details, custom input, and persisted hi
 });
 
 test('infinite loop times out, Stop cancels, and the next run succeeds', async ({ page }) => {
-  await page.goto(`/#${defaultId}`);
+  await page.goto(`/problems/${defaultId}`);
   await setCode(page, 'def normalize_text(text):\n    while True:\n        pass\n');
   await submit(page);
   await expect(page.getByText(/exceeded 20 seconds/)).toBeVisible();
@@ -555,7 +588,7 @@ test('infinite loop times out, Stop cancels, and the next run succeeds', async (
 test('navigation, drafts, reference, reset confirmation, and manually authored library', async ({
   page,
 }) => {
-  await page.goto(`/#${defaultId}`);
+  await page.goto(`/problems/${defaultId}`);
   await setCode(page, reference);
   await page.getByRole('button', { name: 'Next exercise', exact: true }).click();
   const nextExercise =
@@ -596,7 +629,7 @@ test('navigation, drafts, reference, reset confirmation, and manually authored l
   await page.getByRole('button', { name: 'Back to practice', exact: true }).click();
   const library = page.getByRole('main', { name: 'Practice library' });
   await expect(library).toBeVisible();
-  await expect(page).toHaveURL(/#library$/);
+  await expect(page).toHaveURL('http://127.0.0.1:5173/');
   await expect(page.getByRole('dialog')).toHaveCount(0);
   await expect(library).not.toContainText(/Anki|Imported/i);
   await expect(page.getByLabel('Filter by availability')).toHaveCount(0);
@@ -618,7 +651,7 @@ test('warning recovery still allows backup export and explicit restore, with inv
   page,
 }) => {
   await page.addInitScript((key) => localStorage.setItem(key, '{broken'), storageKey);
-  await page.goto(`/#${defaultId}`);
+  await page.goto(`/problems/${defaultId}`);
   await setCode(page, reference);
   await page.getByRole('button', { name: 'Export your progress', exact: true }).click();
   const dialog = page.getByRole('dialog');
@@ -662,7 +695,7 @@ test('warning recovery still allows backup export and explicit restore, with inv
 
 test('corrupt existing storage survives and a clear warning is shown', async ({ page }) => {
   await page.addInitScript((key) => localStorage.setItem(key, '{broken'), storageKey);
-  await page.goto(`/#${defaultId}`);
+  await page.goto(`/problems/${defaultId}`);
   await expect(page.locator('.warning-banner')).toBeVisible();
   await setCode(page, reference);
   await expect(page.locator('.warning-banner')).toContainText('original backup was left untouched');
@@ -672,7 +705,7 @@ test('corrupt existing storage survives and a clear warning is shown', async ({ 
 
 test('mobile layout, tabs, library, and keyboard shortcut', async ({ page }, testInfo) => {
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.goto(`/#${defaultId}`);
+  await page.goto(`/problems/${defaultId}`);
   await expect(page.getByRole('heading', { name: 'Normalize text', exact: true })).toBeVisible();
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath('mobile-problem.png'), fullPage: true });
@@ -705,7 +738,7 @@ test('mobile layout, tabs, library, and keyboard shortcut', async ({ page }, tes
 test('oversized edits never desynchronize displayed code from the executed draft', async ({
   page,
 }) => {
-  await page.goto(`/#${defaultId}`);
+  await page.goto(`/problems/${defaultId}`);
   await setCode(page, reference);
   const editor = page.getByRole('textbox', { name: 'Python solution editor' });
   await editor.click();
@@ -720,7 +753,7 @@ test('oversized edits never desynchronize displayed code from the executed draft
 test('tabs support arrows, editor escapes Tab focus, and dialogs restore focus', async ({
   page,
 }) => {
-  await page.goto(`/#${defaultId}`);
+  await page.goto(`/problems/${defaultId}`);
   const problemTabs = page.getByRole('tablist', { name: 'Problem details' });
   await problemTabs.getByRole('tab', { name: 'Question', exact: true }).focus();
   await page.keyboard.press('ArrowRight');
@@ -766,7 +799,7 @@ test('tabs support arrows, editor escapes Tab focus, and dialogs restore focus',
 test('edited solutions label previous results and resetting clears them without deleting history', async ({
   page,
 }) => {
-  await page.goto(`/#${defaultId}`);
+  await page.goto(`/problems/${defaultId}`);
   await setCode(page, reference);
   await submit(page);
   await expect(page.getByText('Accepted', { exact: true })).toBeVisible();
@@ -791,7 +824,7 @@ test('Solution explains its approach and shows only available useful alternative
     'solutionAlternatives' in exercise ? exercise.solutionAlternatives : undefined
   ) as { title: string; explanation: string; code: string; complexity?: string }[] | undefined;
   expect(alternatives?.length).toBeGreaterThan(0);
-  await page.goto(`/#${exercise.id}`);
+  await page.goto(`/problems/${exercise.id}`);
   const draft = '# this remains my own solution\n' + exercise.starterCode;
   await setCode(page, draft);
   await page.getByRole('tab', { name: 'Solution', exact: true }).click();
@@ -847,7 +880,7 @@ for (const [label, problemId] of containerExamples) {
     const exercise = readyExercises.find((item) => item.id === problemId)!;
     const errors: string[] = [];
     page.on('pageerror', (error) => errors.push(error.stack ?? error.message));
-    await page.goto(`/#${problemId}`);
+    await page.goto(`/problems/${problemId}`);
     await expect(page.getByRole('heading', { name: exercise.title, exact: true })).toBeVisible();
     await expect(page.locator('.topbar-actions, .workspace-progress')).toHaveCount(0);
     await setCode(page, exercise.referenceCode);

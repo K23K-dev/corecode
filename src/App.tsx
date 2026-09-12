@@ -1,5 +1,6 @@
+'use client';
+
 import {
-  Activity,
   useCallback,
   useEffect,
   useRef,
@@ -7,6 +8,10 @@ import {
   useSyncExternalStore,
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
+import Link from 'next/link';
+import dynamic from 'next/dynamic';
+import { useRouter } from 'next/navigation';
+import { useDatabase } from './DatabaseApp';
 import {
   ArrowLeft,
   BookOpen,
@@ -21,11 +26,10 @@ import {
   Square,
   X,
 } from 'lucide-react';
-import CodeEditor from './components/CodeEditor';
 import Modal from './components/Modal';
 import ProgressModal from './components/ProgressModal';
 import PracticeLibrary from './components/PracticeLibrary';
-import ProblemPanel, { type ProblemTab } from './components/ProblemPanel';
+import type { ProblemTab } from './components/ProblemPanel';
 import Results, {
   SubmissionCelebration,
   SubmissionConfetti,
@@ -39,13 +43,39 @@ import {
   type ProgressData,
 } from './lib/progress';
 import { OUTBOX_PREFIX, type Catalog, type ProgressClient } from './lib/database-client';
-import { PracticeRunner, type RunnerStage } from './lib/practice-runner';
+import { PracticeRunner } from './lib/practice-runner';
 
 type Pane = 'results' | 'input';
+const CodeEditor = dynamic(() => import('./components/CodeEditor'), { ssr: false });
+const ProblemPanel = dynamic(() => import('./components/ProblemPanel'));
 
-export default function App({ catalog, client }: { catalog: Catalog; client: ProgressClient }) {
+export default function App({
+  problemId,
+  initialTab = 'question',
+}: {
+  problemId?: string;
+  initialTab?: 'question' | 'solution';
+}) {
+  const { catalog, client } = useDatabase();
+  if (problemId && !catalog.exercises.some((item) => item.id === problemId))
+    return (
+      <main className="empty-state">
+        <h1>Problem not found</h1>
+        <Link href="/" className="button primary">
+          Back to practice
+        </Link>
+      </main>
+    );
   if (!catalog.exercises.length) return <EmptyCatalog catalog={catalog} client={client} />;
-  return <WorkspaceApp catalog={catalog} client={client} />;
+  return (
+    <WorkspaceApp
+      key={problemId ?? 'library'}
+      catalog={catalog}
+      client={client}
+      problemId={problemId}
+      initialTab={initialTab}
+    />
+  );
 }
 
 function EmptyCatalog({ catalog, client }: { catalog: Catalog; client: ProgressClient }) {
@@ -68,7 +98,18 @@ function EmptyCatalog({ catalog, client }: { catalog: Catalog; client: ProgressC
   );
 }
 
-function WorkspaceApp({ catalog, client }: { catalog: Catalog; client: ProgressClient }) {
+function WorkspaceApp({
+  catalog,
+  client,
+  problemId,
+  initialTab,
+}: {
+  catalog: Catalog;
+  client: ProgressClient;
+  problemId?: string;
+  initialTab: 'question' | 'solution';
+}) {
+  const router = useRouter();
   const {
     progress: data,
     stars,
@@ -81,20 +122,9 @@ function WorkspaceApp({ catalog, client }: { catalog: Catalog; client: ProgressC
   );
   const { exercises } = catalog;
   const readyExercises = exercises.filter((item) => Boolean(item.cases?.length));
-  const initialExercise = useCallback(() => {
-    let requested = '';
-    try {
-      requested = decodeURIComponent(location.hash.slice(1));
-    } catch {
-      /* Invalid links fall back to the catalog. */
-    }
-    return exercises.find((item) => item.id === requested) ?? exercises[0];
-  }, [exercises]);
-  const [exercise, setExercise] = useState(initialExercise);
-  const [page, setPage] = useState<'library' | 'workspace'>(() =>
-    exercises.some((item) => `#${item.id}` === location.hash) ? 'workspace' : 'library',
-  );
-  const [leftTab, setLeftTab] = useState<ProblemTab>('question');
+  const exercise = exercises.find((item) => item.id === problemId) ?? exercises[0];
+  const page = problemId ? 'workspace' : 'library';
+  const [leftTab, setLeftTab] = useState<ProblemTab>(initialTab);
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [showProgress, setShowProgress] = useState(false);
   const [showReset, setShowReset] = useState(false);
@@ -103,7 +133,7 @@ function WorkspaceApp({ catalog, client }: { catalog: Catalog; client: ProgressC
   const [customInput, setCustomInput] = useState(exercise.customInput ?? '()');
   const [execution, setExecution] = useState<Execution | null>(null);
   const [celebration, setCelebration] = useState<number | null>(null);
-  const [stage, setStage] = useState<RunnerStage | null>(null);
+  const [running, setRunning] = useState(false);
   const [notice, setNotice] = useState('');
   const [viewAttempt, setViewAttempt] = useState<Attempt | null>(null);
   const runner = useRef<PracticeRunner | null>(null);
@@ -124,12 +154,12 @@ function WorkspaceApp({ catalog, client }: { catalog: Catalog; client: ProgressC
   }, [celebration]);
 
   useEffect(() => {
-    try {
-      runner.current = new PracticeRunner();
-    } catch {
-      setNotice('For Python execution, open http://127.0.0.1:5173.');
-    }
-    return () => runner.current?.dispose();
+    const activeRunner = new PracticeRunner();
+    runner.current = activeRunner;
+    return () => {
+      ++request.current;
+      activeRunner.cancel();
+    };
   }, []);
   useEffect(() => {
     const save = () => {
@@ -159,53 +189,22 @@ function WorkspaceApp({ catalog, client }: { catalog: Catalog; client: ProgressC
     };
   }, [client]);
 
-  const selectExercise = useCallback(
-    (next: Exercise, updateUrl = true, tab: 'question' | 'solution' = 'question') => {
-      ++request.current;
-      runner.current?.cancel();
-      setStage(null);
-      setExercise(next);
-      setCustomInput(next.customInput ?? '()');
-      setExecution(null);
-      setCelebration(null);
-      setLeftTab(tab);
-      setPane('results');
-      setNotice('');
-      setPage('workspace');
-      setConsoleOpen(false);
-      setMobilePane('problem');
-      if (updateUrl) history.pushState(null, '', `#${encodeURIComponent(next.id)}`);
-    },
-    [],
-  );
+  function selectExercise(next: Exercise, tab: 'question' | 'solution' = 'question') {
+    ++request.current;
+    runner.current?.cancel();
+    router.push(
+      `/problems/${encodeURIComponent(next.id)}${tab === 'solution' ? '?tab=solution' : ''}`,
+    );
+  }
   useEffect(() => {
-    const navigate = () => {
-      if (location.hash === '#library' || !location.hash) {
-        ++request.current;
-        runner.current?.cancel();
-        setStage(null);
-        setPage('library');
-        setCelebration(null);
-      } else selectExercise(initialExercise(), false);
-    };
-    window.addEventListener('popstate', navigate);
-    window.addEventListener('hashchange', navigate);
-    return () => {
-      window.removeEventListener('popstate', navigate);
-      window.removeEventListener('hashchange', navigate);
-    };
-  }, [selectExercise, initialExercise]);
-  useEffect(() => {
-    document.title =
-      page === 'library' ? 'Practice · Code Practice' : `${exercise.title} · Code Practice`;
+    document.title = page === 'library' ? 'Code Practice' : `${exercise.title} · Code Practice`;
   }, [exercise.title, page]);
   function openLibrary() {
     ++request.current;
     runner.current?.cancel();
-    setStage(null);
-    setPage('library');
+    setRunning(false);
     setCelebration(null);
-    history.pushState(null, '', '#library');
+    router.push('/');
   }
 
   function updateDraft(next: string) {
@@ -230,28 +229,20 @@ function WorkspaceApp({ catalog, client }: { catalog: Catalog; client: ProgressC
 
   const execute = useCallback(
     async (mode: 'example' | 'submit' | 'custom') => {
-      if (stage || !exercise.cases || !runner.current) return;
+      if (running || !exercise.cases || !runner.current) return;
       const ticket = ++request.current;
       const submittedCode = code;
       const started = performance.now();
       setCelebration(null);
       setPane('results');
       setExecution(null);
-      setStage('loading');
+      setRunning(true);
       setMobilePane('code');
       setNotice('');
       setConsoleOpen(true);
       let attempt: Attempt | undefined;
       try {
-        const result = await runner.current.run(
-          exercise,
-          submittedCode,
-          mode,
-          customInput,
-          (next) => {
-            if (ticket === request.current) setStage(next);
-          },
-        );
+        const result = await runner.current.run(exercise, submittedCode, mode, customInput);
         if (ticket !== request.current) return;
         setExecution({ mode, result, code: submittedCode });
         if (mode === 'submit') {
@@ -295,7 +286,7 @@ function WorkspaceApp({ catalog, client }: { catalog: Catalog; client: ProgressC
             durationMs: performance.now() - started,
           };
       } finally {
-        if (ticket === request.current) setStage(null);
+        if (ticket === request.current) setRunning(false);
       }
       if (attempt) {
         const completed = attempt;
@@ -317,7 +308,7 @@ function WorkspaceApp({ catalog, client }: { catalog: Catalog; client: ProgressC
         }));
       }
     },
-    [stage, exercise, code, customInput, setData],
+    [running, exercise, code, customInput, setData],
   );
   useEffect(() => {
     const shortcut = (event: KeyboardEvent) => {
@@ -338,7 +329,7 @@ function WorkspaceApp({ catalog, client }: { catalog: Catalog; client: ProgressC
     setCelebration(null);
     ++request.current;
     runner.current?.cancel();
-    setStage(null);
+    setRunning(false);
     setExecution({ mode: 'example', error: 'Run canceled. Your code is still in the editor.' });
   }
 
@@ -372,7 +363,7 @@ function WorkspaceApp({ catalog, client }: { catalog: Catalog; client: ProgressC
     setCelebration(null);
     ++request.current;
     runner.current?.cancel();
-    setStage(null);
+    setRunning(false);
     setExecution(null);
     client.restore(next);
   }
@@ -392,7 +383,7 @@ function WorkspaceApp({ catalog, client }: { catalog: Catalog; client: ProgressC
       <header className="topbar">
         <a
           className="brand"
-          href="#library"
+          href="/"
           onClick={(event) => {
             event.preventDefault();
             openLibrary();
@@ -434,11 +425,11 @@ function WorkspaceApp({ catalog, client }: { catalog: Catalog; client: ProgressC
           <button onClick={() => setShowProgress(true)}>Export your progress</button>
         </div>
       )}
-      <Activity mode={page === 'library' ? 'visible' : 'hidden'}>
+      {page === 'library' && (
         <div className="library-page-shell">
           <PracticeLibrary
             progress={data}
-            onSelect={(next, tab) => selectExercise(next, true, tab)}
+            onSelect={selectExercise}
             catalog={catalog}
             starred={stars}
             saveState={status}
@@ -446,7 +437,7 @@ function WorkspaceApp({ catalog, client }: { catalog: Catalog; client: ProgressC
             onSolved={(item, value) => client.setSolved(item.id, value, item.starterCode)}
           />
         </div>
-      </Activity>
+      )}
       {page === 'workspace' && (
         <div className="app-body">
           <main className="main-workspace">
@@ -483,7 +474,7 @@ function WorkspaceApp({ catalog, client }: { catalog: Catalog; client: ProgressC
                   </div>
                   <button
                     className="button quiet reset-button"
-                    disabled={Boolean(stage)}
+                    disabled={running}
                     onClick={() => setShowReset(true)}
                     title="Reset code"
                   >
@@ -501,7 +492,7 @@ function WorkspaceApp({ catalog, client }: { catalog: Catalog; client: ProgressC
                         'That edit exceeds the code size limit (32,768 characters / 50 KiB). Your existing code has been kept.',
                       )
                     }
-                    readOnly={Boolean(stage)}
+                    readOnly={running}
                   />
                   {celebration !== null && <SubmissionCelebration key={celebration} />}
                 </div>
@@ -559,7 +550,7 @@ function WorkspaceApp({ catalog, client }: { catalog: Catalog; client: ProgressC
                       {pane === 'results' && (
                         <Results
                           execution={execution}
-                          stage={stage}
+                          running={running}
                           stale={Boolean(execution?.code && execution.code !== code)}
                         />
                       )}
@@ -576,12 +567,12 @@ function WorkspaceApp({ catalog, client }: { catalog: Catalog; client: ProgressC
                             onChange={(event) => setCustomInput(event.target.value)}
                             maxLength={8000}
                             spellCheck={false}
-                            disabled={!ready || Boolean(stage)}
+                            disabled={!ready || running}
                           />
                           <div className="custom-input-footer">
                             <button
                               className="button secondary"
-                              disabled={!ready || Boolean(stage)}
+                              disabled={!ready || running}
                               onClick={() => void execute('custom')}
                             >
                               <Play size={14} /> Run input
@@ -602,7 +593,7 @@ function WorkspaceApp({ catalog, client }: { catalog: Catalog; client: ProgressC
                     Console{consoleOpen ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
                   </button>
                   <div>
-                    {stage ? (
+                    {running ? (
                       <button className="button stop" onClick={cancel}>
                         <Square size={14} /> Stop
                       </button>

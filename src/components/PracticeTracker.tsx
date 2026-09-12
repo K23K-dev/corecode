@@ -20,6 +20,12 @@ const circumference = 2 * Math.PI * 52;
 
 type ClockAnchor = { serverTime: number; receivedAt: number };
 
+export function useCalendarView() {
+  const [month, setMonth] = useState(() => practiceClock().today.slice(0, 7));
+  const [selected, setSelected] = useState(() => practiceClock().today);
+  return useMemo(() => ({ month, setMonth, selected, setSelected }), [month, selected]);
+}
+
 // Only this small row ticks each second; the calendar and library do not rerender.
 function DayCountdown({
   anchor,
@@ -58,16 +64,17 @@ export default function PracticeTracker({
   exercises,
   progress,
   saveState,
+  calendar,
 }: {
   exercises: Exercise[];
   progress: ProgressData;
   saveState: string;
+  calendar: ReturnType<typeof useCalendarView>;
 }) {
   const [today, setToday] = useState(() => practiceClock().today);
   const [clockAnchor, setClockAnchor] = useState<ClockAnchor | null>(null);
   const lastClockAnchor = useRef<ClockAnchor | null>(null);
-  const [month, setMonth] = useState(() => today.slice(0, 7));
-  const [selected, setSelected] = useState(today);
+  const { month, setMonth, selected, setSelected } = calendar;
   const previousToday = useRef(today);
   const [history, setHistory] = useState<ActivitySnapshot | null>(null);
   const [error, setError] = useState('');
@@ -134,7 +141,7 @@ export default function PracticeTracker({
     setMonth((value) => (value === previous.slice(0, 7) ? today.slice(0, 7) : value));
     setSelected((value) => (value === previous ? today : value));
     previousToday.current = today;
-  }, [today]);
+  }, [today, setMonth, setSelected]);
 
   useEffect(() => {
     // Reads always show committed history; saving acknowledgments trigger a

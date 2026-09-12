@@ -81,7 +81,7 @@ for (const scenario of scenarios) {
     expect(exercise.starterCode).toMatch(new RegExp(`def ${scenario.method}\\(self(?:,|\\))`));
     const errors: string[] = [];
     page.on('pageerror', (error) => errors.push(error.stack ?? error.message));
-    await page.goto(`/#${scenario.id}`);
+    await page.goto(`/problems/${scenario.id}`);
     await expectEditorCode(page, exercise.starterCode);
     await page.screenshot({
       path: testInfo.outputPath(`${scenario.runtime}-wrapped-starter.png`),
@@ -165,7 +165,7 @@ test('previous standalone Python drafts survive wrapped catalog loading and stil
     [JSON.stringify(progress)],
   );
   for (const scenario of scenarios) {
-    await page.goto(`/#${scenario.id}`);
+    await page.goto(`/problems/${scenario.id}`);
     await expectEditorCode(page, scenario.legacy);
     await page.getByRole('tab', { name: 'Solution', exact: true }).click();
     await expect(page.locator('.reference-code .cm-content').first()).toContainText(

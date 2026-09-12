@@ -13,9 +13,11 @@ const mocks = vi.hoisted(() => ({
   readExecutionProblem: vi.fn(),
   localExecute: vi.fn(),
   hostedExecute: vi.fn(),
+  after: vi.fn(),
 }));
 
 vi.mock('@vercel/functions', () => ({ attachDatabasePool: mocks.attachPool }));
+vi.mock('next/server', () => ({ after: mocks.after }));
 vi.mock('pg', () => ({
   Pool: class {
     constructor() {
@@ -34,17 +36,22 @@ vi.mock('../server/repository.mjs', async (importOriginal) => ({
   readExecutionProblem: mocks.readExecutionProblem,
 }));
 vi.mock('../runner/execution.mjs', () => ({ executeProblem: mocks.localExecute }));
+vi.mock('../runner/sandbox.mjs', () => ({ executeSandboxProblem: mocks.hostedExecute }));
 
-const serverModule = '../server/vercel.mjs';
-const { readVercelConfiguration, createVercelHandler } = (await import(serverModule)) as {
+const serverModule = '../server/index.mjs';
+const { readVercelConfiguration, createApiHandler } = (await import(serverModule)) as {
   readVercelConfiguration(environment: Record<string, string | undefined>): {
     appOrigin: string;
     connectionString: string;
   };
-  createVercelHandler(options: {
+  createApiHandler(options: {
     environment: Record<string, string | undefined>;
     executeCode: typeof mocks.hostedExecute;
-  }): http.RequestListener & { listen: unknown };
+  }): (request: Request) => Promise<Response>;
+};
+const adapterModule = './http-test-server.mjs';
+const { requestListener } = (await import(adapterModule)) as {
+  requestListener(handle: (request: Request) => Promise<Response>): http.RequestListener;
 };
 const ORIGIN = 'https://practice.example.com';
 // Synthetic fixture only. No real connection or remote call is used in this suite.
@@ -64,11 +71,11 @@ const pool = { query: vi.fn(), end: vi.fn() };
 let servers: Server[];
 
 async function serve(overrides: Record<string, string | undefined> = {}) {
-  const handler = createVercelHandler({
+  const handler = createApiHandler({
     environment: { ...ENVIRONMENT, ...overrides },
     executeCode: mocks.hostedExecute,
   });
-  const server = http.createServer(handler);
+  const server = http.createServer(requestListener(handler));
   servers.push(server);
   await new Promise<void>((resolve) => server.listen(0, '127.0.0.1', resolve));
   return server;
@@ -140,6 +147,7 @@ beforeEach(() => {
 });
 
 afterEach(async () => {
+  vi.unstubAllEnvs();
   await Promise.all(
     servers.map((server) => new Promise<void>((resolve) => server.close(() => resolve()))),
   );
@@ -202,6 +210,59 @@ describe('private Vercel deployment configuration', () => {
 });
 
 describe('Vercel handler with an offline repository', () => {
+  it('initializes the local schema lazily once and shares the resulting pool across concurrent reads', async () => {
+    const handler = createApiHandler({
+      environment: { POSTGRES_URL: CONNECTION },
+      executeCode: mocks.localExecute,
+    });
+    expect(mocks.initializeDatabase).not.toHaveBeenCalled();
+    expect(mocks.createPool).not.toHaveBeenCalled();
+    const replies = await Promise.all(
+      ['/api/state', '/api/catalog'].map((path) =>
+        handler(
+          new Request('http://127.0.0.1:5173' + path, { headers: { Host: '127.0.0.1:5173' } }),
+        ),
+      ),
+    );
+    expect(replies.map((reply) => reply.status)).toEqual([200, 200]);
+    expect(mocks.initializeDatabase).toHaveBeenCalledExactlyOnceWith(CONNECTION);
+    expect(mocks.createPool).toHaveBeenCalledExactlyOnceWith(CONNECTION);
+    expect(mocks.attachPool).not.toHaveBeenCalled();
+  });
+
+  it('rejects untrusted local requests before schema initialization or pool creation', async () => {
+    const handler = createApiHandler({
+      environment: { POSTGRES_URL: CONNECTION },
+      executeCode: mocks.localExecute,
+    });
+    const reply = await handler(
+      new Request('http://127.0.0.1:5173/api/state', {
+        headers: { Host: 'attacker.example.com' },
+      }),
+    );
+    expect(reply.status).toBe(403);
+    expect(mocks.initializeDatabase).not.toHaveBeenCalled();
+    expect(mocks.createPool).not.toHaveBeenCalled();
+  });
+
+  it('allows retry after local schema initialization fails without retaining a rejected promise', async () => {
+    mocks.initializeDatabase.mockRejectedValueOnce(new Error('private connection failure'));
+    const handler = createApiHandler({
+      environment: { POSTGRES_URL: CONNECTION },
+      executeCode: mocks.localExecute,
+    });
+    const request = () =>
+      new Request('http://127.0.0.1:5173/api/state', {
+        headers: { Host: '127.0.0.1:5173' },
+      });
+    const failed = await handler(request());
+    expect(failed.status).toBe(503);
+    expect(await failed.text()).not.toContain('private connection failure');
+    expect((await handler(request())).status).toBe(200);
+    expect(mocks.initializeDatabase).toHaveBeenCalledTimes(2);
+    expect(mocks.createPool).toHaveBeenCalledOnce();
+  });
+
   it('does not create a pool at module/handler creation and reuses it across requests', async () => {
     const server = await serve();
     expect(mocks.createPool).not.toHaveBeenCalled();
@@ -224,13 +285,19 @@ describe('Vercel handler with an offline repository', () => {
     expect(pool.query).not.toHaveBeenCalled();
   });
 
-  it('exports an Express application so Vercel does not install its own body/response helpers', () => {
-    const handler = createVercelHandler({
+  it('uses the standard Web Request/Response contract expected by Next route handlers', async () => {
+    const handler = createApiHandler({
       environment: ENVIRONMENT,
       executeCode: mocks.hostedExecute,
     });
-    expect(typeof handler.listen).toBe('function');
     expect(mocks.createPool).not.toHaveBeenCalled();
+    const response = await handler(
+      new Request(ORIGIN + '/api/health', {
+        headers: { Host: new URL(ORIGIN).host },
+      }),
+    );
+    expect(response).toBeInstanceOf(Response);
+    expect(await response.json()).toEqual({ ok: true });
   });
 
   it('returns fixed JSON setup errors without disclosing configuration or opening storage', async () => {
@@ -316,7 +383,56 @@ describe('Vercel handler with an offline repository', () => {
   });
 });
 
-describe('Vite + Vercel deployment routing', () => {
+describe('Next route cancellation lifecycle', () => {
+  it.each(['run', 'state'] as const)(
+    'retains pending %s cleanup or transaction completion after client cancellation',
+    async (operation) => {
+      for (const [key, value] of Object.entries(ENVIRONMENT)) vi.stubEnv(key, value);
+      vi.stubEnv('APP_ORIGIN', ORIGIN);
+      const route = await import('../src/app/api/[...path]/route');
+      const pendingOperation = operation === 'run' ? mocks.hostedExecute : mocks.writeState;
+      let release!: (value: unknown) => void;
+      pendingOperation.mockImplementationOnce(
+        () =>
+          new Promise((resolve) => {
+            release = resolve;
+          }),
+      );
+      const controller = new AbortController();
+      const request = new Request(`${ORIGIN}/api/${operation}`, {
+        method: operation === 'run' ? 'POST' : 'PUT',
+        headers: {
+          Host: new URL(ORIGIN).host,
+          Origin: ORIGIN,
+          'Content-Type': 'application/json',
+          'X-Code-Practice-Client': '1',
+        },
+        body: JSON.stringify(
+          operation === 'run'
+            ? { problemId: EXECUTION.id, code: '# inert fixture' }
+            : { expectedRevision: 4, progress: STATE.progress, stars: [] },
+        ),
+        signal: controller.signal,
+      });
+      const response = operation === 'run' ? route.POST(request) : route.PUT(request);
+      expect(mocks.after).toHaveBeenCalledOnce();
+      await vi.waitFor(() => expect(pendingOperation).toHaveBeenCalledOnce());
+      const finished = vi.fn();
+      const retained = mocks.after.mock.calls[0][0]().then(finished);
+      controller.abort();
+      if (operation === 'run')
+        expect(mocks.hostedExecute.mock.calls[0][2].signal.aborted).toBe(true);
+      await Promise.resolve();
+      expect(finished).not.toHaveBeenCalled();
+      release(operation === 'run' ? { cases: [], stdout: '', durationMs: 1 } : STATE);
+      expect((await response).status).toBe(200);
+      await retained;
+      expect(finished).toHaveBeenCalledOnce();
+    },
+  );
+});
+
+describe('Next.js + Vercel deployment routing', () => {
   it('excludes private configuration and local artifacts from direct CLI uploads', async () => {
     // Vercel CLI source uploads do not read .gitignore. These exclusions must
     // stay in the deployment-specific ignore file even when Git also ignores them.
@@ -336,6 +452,7 @@ describe('Vite + Vercel deployment routing', () => {
         'node_modules',
         'dist',
         'build',
+        '.next',
         '*.log',
         'playwright-report',
         'test-results',
@@ -343,23 +460,26 @@ describe('Vite + Vercel deployment routing', () => {
     );
     // The remote build still type-checks tests, and API imports require both
     // server and runner source. Do not hide these to reduce the upload size.
-    for (const source of ['api', 'server', 'runner', 'src', 'tests']) {
+    for (const source of ['server', 'runner', 'src', 'tests']) {
       expect(rules).not.toContain(source);
     }
     expect(rules.some((rule) => rule.startsWith('!'))).toBe(false);
   });
 
-  it('deploys an API function before the SPA fallback without publishing source directories', async () => {
+  it('lets Next own routing and keeps API execution server-only and uncached', async () => {
     const config = JSON.parse(await readFile(new URL('../vercel.json', import.meta.url), 'utf8'));
-    expect(config.framework).toBe('vite');
-    expect(config.outputDirectory).toBe('dist');
-    expect(config.buildCommand).toBe('npm run build');
-    expect(config.functions['api/index.mjs']).toEqual({ maxDuration: 300 });
-    expect(config.rewrites).toEqual([
-      { source: '/api/:path*', destination: '/api/index' },
-      { source: '/((?!api(?:/|$)).*)', destination: '/index.html' },
-    ]);
+    expect(config.framework).toBe('nextjs');
+    expect(config.outputDirectory).toBeUndefined();
+    expect(config.functions).toEqual({ 'src/app/api/**/*': { supportsCancellation: true } });
+    expect(config.rewrites).toBeUndefined();
     expect(config.builds).toBeUndefined();
     expect(config.env).toBeUndefined();
+    const route = await readFile(
+      new URL('../src/app/api/[...path]/route.ts', import.meta.url),
+      'utf8',
+    );
+    expect(route).toContain("runtime = 'nodejs'");
+    expect(route).toContain("dynamic = 'force-dynamic'");
+    expect(route).toContain('maxDuration = 300');
   });
 });

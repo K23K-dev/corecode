@@ -1,6 +1,3 @@
-import { readFileSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { Catalog } from '../src/lib/database-client';
 import type { Exercise } from '../src/lib/exercises';
@@ -16,7 +13,6 @@ type WebsiteProblem = Exercise & {
 };
 // Opt in before loading private settings: ordinary unit tests stay entirely offline.
 const verifyNeonCatalog = process.env.VERIFY_NEON_CATALOG === '1';
-const projectRoot = fileURLToPath(new URL('../', import.meta.url));
 const expectedStudyDecks = [
   'Python',
   'NumPy',
@@ -71,52 +67,9 @@ const expectedSignatures: Record<string, string> = {
   'python-core-pairwise-sums-01': 'def pairwise_sums(left, right):',
 };
 
-function sourceFiles(directory: string): string[] {
-  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
-    const path = join(directory, entry.name);
-    if (entry.isDirectory()) return sourceFiles(path);
-    return /\.(?:[cm]?[jt]s|tsx|jsx)$/.test(entry.name) ? [path] : [];
-  });
-}
-
 function exampleCall(entryPoint: string, args: string): string {
   return `${entryPoint}(${args.slice(1, -1).replace(/,\s*$/, '')})`;
 }
-
-describe('offline catalog architecture', () => {
-  it('never loads a local catalog or runs Anki conversion during application startup', () => {
-    const paths = [
-      ...sourceFiles(join(projectRoot, 'src')),
-      ...sourceFiles(join(projectRoot, 'server')),
-      join(projectRoot, 'vite.config.ts'),
-    ];
-    for (const path of paths) {
-      const source = readFileSync(path, 'utf8');
-      // A deny-list entry is not a dependency: Vite may block historical snapshots.
-      expect(source, path).not.toMatch(
-        /(?:from\s*|(?:import|require|fetch|readFile|readFileSync)\s*\(\s*|new URL\(\s*)['"][^'"]*(?:data[\\/](?:ready-exercises|exercises|decks)\.json|generated[\\/]catalog\.json)/i,
-      );
-      expect(source, path).not.toMatch(/build-catalog|prepare-catalog|export_anki|ankiconnect/i);
-      expect(source, path).not.toMatch(
-        /(?:from\s+|(?:import|require|fetch)\s*\(?\s*)['"][^'"]*anki/i,
-      );
-    }
-    const packageJson = JSON.parse(readFileSync(join(projectRoot, 'package.json'), 'utf8')) as {
-      scripts: Record<string, string>;
-    };
-    for (const script of ['dev', 'start', 'build', 'predev', 'prestart', 'prebuild']) {
-      expect(packageJson.scripts[script] ?? '').not.toMatch(
-        /anki|(?:build|prepare)-catalog|export_anki|\brun catalog\b/i,
-      );
-    }
-  });
-
-  it('keeps the exercise module type-only, without a bundled catalog fallback', () => {
-    const source = readFileSync(join(projectRoot, 'src/lib/exercises.ts'), 'utf8');
-    expect(source).not.toMatch(/\.json['"]|\b(?:readFile|readFileSync|fetch|require)\s*\(/);
-    expect(source).not.toMatch(/\bexport\s+(?:const|let|var|function|class)\b/);
-  });
-});
 
 describe.skipIf(!verifyNeonCatalog)('read-only Neon catalog contracts', () => {
   let readyData: WebsiteProblem[];
@@ -178,6 +131,123 @@ describe.skipIf(!verifyNeonCatalog)('read-only Neon catalog contracts', () => {
           decks.some((deck) => deck.id === exercise.deckId && deck.name === exercise.deck),
         ),
       ).toBe(true);
+    });
+
+    it('places foundational exercises before their same-deck composition exercises', () => {
+      // These are selected prerequisite edges, not a second catalog or a complete sort order.
+      const chains: Record<string, string[][]> = {
+        python: [
+          ['python-core-slice-window-01', 'python-core-reversed-copy-01'],
+          ['python-core-frequency-map-01', 'python-core-most-common-values-01'],
+        ],
+        frontend: [
+          ['frontend-html-001-semantic-product-card', 'frontend-browser-001-render-list'],
+          ['frontend-tsx-001-typed-user-list', 'frontend-react-003-counter'],
+          ['frontend-react-009-load-user', 'frontend-react-014-paginated-products'],
+        ],
+        backend: [
+          ['backend-express-000-app-wiring', 'backend-express-001-get-product'],
+          ['backend-pg-001-with-client', 'backend-pg-002-transaction'],
+          ['backend-auth-000-insert-user', 'backend-auth-001-register', 'backend-auth-002-login'],
+        ],
+        sql: [
+          [
+            'sql-practice-select-aliases',
+            'sql-select-filter-products',
+            'sql-join-orders-customers',
+          ],
+          ['sql-group-top-categories', 'sql-practice-cte-customer-spend'],
+          ['sql-practice-order-limit-ties', 'sql-practice-top-two-salaries-11'],
+        ],
+        linux: [
+          ['linux-practice-inspect-location-19', 'linux-practice-file-workflow-21'],
+          ['linux-practice-list-processes-08', 'linux-practice-kill-term-09'],
+          ['linux-practice-tar-create-17', 'linux-practice-tar-extract-56'],
+        ],
+        'low-level-design': [
+          ['lld-strategy-parking-fee-01', 'lld-parking-lot-allocate-space-01'],
+          ['lld-state-vending-delegation-01', 'lld-vending-machine-vend-01'],
+        ],
+        'machine-learning': [
+          ['ml-practice-014', 'ml-practice-030', 'ml-practice-002'],
+          ['ml-practice-005', 'ml-practice-006', 'ml-practice-007'],
+          ['ml-practice-016', 'ml-practice-017', 'ml-practice-018', 'ml-practice-019'],
+        ],
+        'deep-learning': [
+          ['dl-practice-001', 'dl-practice-002', 'dl-practice-003'],
+          ['dl-practice-006', 'dl-practice-007', 'dl-practice-009', 'dl-practice-010'],
+          ['dl-practice-011', 'dl-practice-012', 'dl-practice-013', 'dl-practice-014'],
+        ],
+        llm: [
+          [
+            'llm-practice-001',
+            'llm-practice-002',
+            'llm-practice-003',
+            'llm-practice-004',
+            'llm-practice-007',
+            'llm-practice-008',
+            'llm-practice-010',
+            'llm-practice-011',
+            'llm-practice-012',
+          ],
+          ['llm-practice-013', 'llm-practice-014'],
+          ['llm-practice-015', 'llm-practice-016'],
+        ],
+        'llm-applications': [
+          [
+            'llm-app-practice-001',
+            'llm-app-practice-002',
+            'llm-app-practice-003',
+            'llm-app-practice-004',
+            'llm-app-practice-005',
+          ],
+          ['llm-app-practice-006', 'llm-app-practice-007', 'llm-app-practice-008'],
+        ],
+        algorithms: [
+          ['algo-sort-003-merge-sorted', 'algo-sort-004-merge-sort'],
+          ['algo-sort-005-partition', 'algo-sort-006-quicksort', 'algo-search-004-quickselect'],
+          [
+            'algo-tree-001-preorder',
+            'algo-tree-002-inorder',
+            'algo-tree-003-postorder',
+            'algo-tree-004-level-order',
+          ],
+          ['algo-graph-001-bfs-distances', 'algo-graph-003-connected-components'],
+        ],
+        'data-structures': [
+          ['ds-stack-001-complete', 'ds-deque-003-complete'],
+          ['ds-queue-001-complete', 'ds-deque-003-complete'],
+          ['ds-array-001-resize', 'ds-array-002-remove-at', 'ds-array-003-complete'],
+        ],
+        numpy: [
+          ['numpy-array-profile-01', 'numpy-make-grid-01', 'numpy-flatten-batch-01'],
+          ['numpy-crop-01', 'numpy-independent-slice-01'],
+          ['numpy-add-column-offsets-01', 'numpy-zscore-01'],
+        ],
+        pandas: [
+          [
+            'pandas-selection-return-types-01',
+            'pandas-select-block-01',
+            'pandas-slice-endpoints-01',
+          ],
+          ['pandas-missing-mask-01', 'pandas-missing-report-01'],
+          ['pandas-observed-summary-01', 'pandas-missing-report-01'],
+          ['pandas-group-size-vs-count-01', 'pandas-category-stats-01'],
+          ['pandas-merge-retention-01', 'pandas-enriched-01', 'pandas-validated-order-items-01'],
+        ],
+      };
+      const positions = new Map(readyData.map((exercise, index) => [exercise.id, index]));
+      for (const [deckId, sequences] of Object.entries(chains)) {
+        for (const ids of sequences) {
+          let previous = -1;
+          for (const id of ids) {
+            expect(readyById.get(id)?.deckId, `${id} belongs to ${deckId}`).toBe(deckId);
+            const position = positions.get(id)!;
+            expect(position, `${deckId}: ${ids.join(' → ')}`).toBeGreaterThan(previous);
+            previous = position;
+          }
+        }
+      }
     });
 
     it('provides bounded behavioral metadata without leaking server-side grading code', () => {

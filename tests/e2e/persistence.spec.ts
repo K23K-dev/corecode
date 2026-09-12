@@ -47,7 +47,7 @@ async function state(database: TestDatabase) {
 }
 
 async function showAll(page: Page) {
-  await page.goto(origin + '/#library');
+  await page.goto(origin + '/');
   await page.getByRole('button', { name: /^All problems/ }).click();
 }
 
@@ -94,7 +94,7 @@ test('acknowledged drafts, stars, and real submissions are available in a fresh 
   database,
 }) => {
   const draft = '# saved in PostgreSQL, not this browser\n' + reference;
-  await page.goto(`/#${id}`);
+  await page.goto(`/problems/${id}`);
   await setCode(page, draft);
   await page.getByRole('button', { name: 'Submit', exact: true }).click();
   await expect(page.getByText('Accepted', { exact: true })).toBeVisible({ timeout: 45_000 });
@@ -120,7 +120,7 @@ test('acknowledged drafts, stars, and real submissions are available in a fresh 
   const fresh = await browser.newContext();
   try {
     const second = await fresh.newPage();
-    await second.goto(`${origin}/#${id}`);
+    await second.goto(`${origin}/problems/${id}`);
     await expectCode(second, draft);
     await expect(second.locator('.solved-label')).toBeVisible();
     await expect(second.locator('.topbar-actions, .workspace-progress')).toHaveCount(0);
@@ -173,7 +173,7 @@ test('legacy migration archives all attempts, retains unknown IDs and original b
     },
     { progressKey, starsKey, rawProgress, rawStars },
   );
-  await page.goto(`/#${id}`);
+  await page.goto(`/problems/${id}`);
   await expect(page.getByRole('textbox', { name: 'Python solution editor' })).toContainText(
     '# migrated draft',
   );
@@ -255,7 +255,7 @@ test('failed network saves stay visibly pending across reload and recover only a
       return originalFetch(input, init);
     };
   });
-  await page.goto(`/#${id}`);
+  await page.goto(`/problems/${id}`);
   await expect(page.locator('.app')).toHaveAttribute('data-save-state', 'saved');
   const draft = '# survives an interrupted connection\n' + reference;
   await setCode(page, draft);
@@ -302,7 +302,7 @@ test('saving status is not successful while the database request is still unackn
   const requestStarted = new Promise<void>((resolve) => {
     started = resolve;
   });
-  await page.goto(`/#${id}`);
+  await page.goto(`/problems/${id}`);
   await expect(page.locator('.app')).toHaveAttribute('data-save-state', 'saved');
   await page.route('**/api/state', async (route) => {
     if (route.request().method() !== 'PUT') {
@@ -395,12 +395,12 @@ test('stale browser revisions merge unrelated drafts and preserve another browse
   const requestStarted = new Promise<void>((resolve) => {
     started = resolve;
   });
-  await page.goto(`/#${id}`);
+  await page.goto(`/problems/${id}`);
   await expect(page.locator('.app')).toHaveAttribute('data-save-state', 'saved');
   const fresh = await browser.newContext();
   try {
     const second = await fresh.newPage();
-    await second.goto(`${origin}/#${actualOther.id}`);
+    await second.goto(`${origin}/problems/${actualOther.id}`);
     await expect(second.locator('.app')).toHaveAttribute('data-save-state', 'saved');
     const statuses: number[] = [];
     second.on('response', (response) => {
@@ -441,7 +441,7 @@ for (const unavailable of ['catalog', 'state']) {
     database,
   }) => {
     await page.route(`**/api/${unavailable}`, (route) => route.abort('failed'));
-    await page.goto(`/#${id}`);
+    await page.goto(`/problems/${id}`);
     await expect(
       page.getByRole('heading', { name: 'Practice could not be loaded', exact: true }),
     ).toBeVisible();

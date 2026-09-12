@@ -1,33 +1,79 @@
-import express from 'express';
-import { protectHostedRequest, protectRequest } from './middleware/request-protection.mjs';
-import { errorHandler, notFound } from './middleware/errors.mjs';
-import { practiceRoutes } from './routes/practice.mjs';
+import {
+  readActivity,
+  readCatalog,
+  readExecutionProblem,
+  readState,
+  repairActivity,
+  writeState,
+} from './repository.mjs';
+import { errorResponse, jsonBody, jsonResponse, protectRequest } from './http.mjs';
+import { RequestError } from './validation.mjs';
 
-/** HTTP composition only: database ownership and listening belong to index.mjs. */
+const METHODS = {
+  '/api/health': ['GET'],
+  '/api/catalog': ['GET'],
+  '/api/state': ['GET', 'PUT'],
+  '/api/activity': ['GET'],
+  '/api/activity/repairs': ['POST'],
+  '/api/run': ['POST'],
+};
+
+/** The same Web Request handler runs in Next.js and in offline contract tests. */
 export function createApp({
   pool,
+  getPool = async () => pool,
   appOrigin = 'http://127.0.0.1:5173',
   hosted = false,
-  executeCode,
+  executeCode = async (...args) => {
+    const { executeProblem } = await import('../runner/execution.mjs');
+    return executeProblem(...args);
+  },
 }) {
-  const app = express();
-  app.disable('x-powered-by');
-  app.disable('etag');
-  app.disable('trust proxy');
-  app.disable('query parser');
-  app.enable('case sensitive routing');
-  app.enable('strict routing');
-
-  app.use((request, response, next) => {
-    // This no-store interface always returns current JSON, never an empty 304.
-    delete request.headers['if-none-match'];
-    delete request.headers['if-modified-since'];
-    response.set({ 'Cache-Control': 'no-store', 'X-Content-Type-Options': 'nosniff' });
-    next();
-  });
-  app.use(hosted ? protectHostedRequest(appOrigin) : protectRequest(appOrigin));
-  app.use(practiceRoutes(pool, executeCode));
-  app.use(notFound);
-  app.use(errorHandler);
-  return app;
+  const protect = protectRequest(appOrigin, hosted);
+  return async (request) => {
+    try {
+      protect(request);
+      const path = new URL(request.url).pathname;
+      const methods = METHODS[path];
+      if (!methods) throw new RequestError('Endpoint not found.', 404, 'not_found');
+      if (!methods.includes(request.method)) {
+        throw new RequestError('Method not allowed.', 405, 'method_not_allowed');
+      }
+      const body = request.method === 'GET' ? undefined : await jsonBody(request);
+      request.signal.throwIfAborted();
+      const database = await getPool();
+      request.signal.throwIfAborted();
+      let result;
+      switch (path) {
+        case '/api/health':
+          await database.query('SELECT 1');
+          result = { ok: true };
+          break;
+        case '/api/catalog':
+          result = await readCatalog(database);
+          break;
+        case '/api/state':
+          result =
+            request.method === 'GET' ? await readState(database) : await writeState(database, body);
+          break;
+        case '/api/activity':
+          result = await readActivity(database);
+          break;
+        case '/api/activity/repairs':
+          result = await repairActivity(database, body);
+          break;
+        case '/api/run': {
+          const problem = await readExecutionProblem(database, body?.problemId);
+          // Next aborts the request signal when its client disconnects. A pending
+          // database read must not start a runner after the user has pressed Stop.
+          request.signal.throwIfAborted();
+          result = await executeCode(body, problem, { signal: request.signal });
+          break;
+        }
+      }
+      return jsonResponse(result);
+    } catch (error) {
+      return errorResponse(error, request.method === 'HEAD');
+    }
+  };
 }

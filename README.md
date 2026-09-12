@@ -1,6 +1,6 @@
 # Code Practice
 
-A personal coding-practice website. Problems, grading cases, and progress live in Neon.
+A Next.js coding-practice website. Problems, grading cases, and progress live in Neon.
 
 ## Run locally
 
@@ -18,6 +18,7 @@ Open [localhost:5173](http://127.0.0.1:5173). For a built version, run
 
 ## Vercel
 
+Use the **Next.js** framework preset with default build/output settings.
 Keep **Vercel Authentication → All Deployments** enabled: this app shares one
 personal profile. Set these variables in Production only:
 

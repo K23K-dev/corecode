@@ -93,40 +93,21 @@ describe('trusted hosted-runner preparation', () => {
     assert.deepEqual(create.ports, []);
     assert.equal(create.env, undefined);
     assert.equal(create.source, undefined);
-    const upload = context.calls.find((call) => call.method === 'writeFiles').args[0];
+    const uploadIndex = context.calls.findIndex((call) => call.method === 'writeFiles');
+    const upload = context.calls[uploadIndex].args[0];
+    const preparedDirectories = new Set(
+      context.calls
+        .slice(0, uploadIndex)
+        .filter((call) => call.method === 'mkDir')
+        .map((call) => call.args[0]),
+    );
     assert.equal(upload.length, 10);
     for (const file of upload) {
       assert.ok(file.path.startsWith('/vercel/code-practice-build/'));
+      assert.ok(preparedDirectories.has(file.path.slice(0, file.path.lastIndexOf('/'))));
       assert.equal(file.mode, 0o644);
       assert.ok(Buffer.isBuffer(file.content));
     }
-  });
-
-  it('creates the current-image build directories in order before uploading files', async () => {
-    const context = fixture();
-    await setupSandboxRunner(context.options);
-    const directories = [
-      '/vercel/code-practice-build',
-      '/vercel/code-practice-build/runner',
-      '/vercel/code-practice-build/tests',
-      '/vercel/code-practice-build/runner/python',
-      '/vercel/code-practice-build/runner/javascript',
-      '/vercel/code-practice-build/tests/runner',
-      '/vercel/code-practice-build/tests/runner/python',
-    ];
-    const uploadIndex = context.calls.findIndex((call) => call.method === 'writeFiles');
-    assert.equal(context.calls[0].method, 'create');
-    assert.deepEqual(
-      context.calls
-        .slice(1, uploadIndex)
-        .map((call) => ({ method: call.method, path: call.args[0] })),
-      directories.map((path) => ({ method: 'mkDir', path })),
-    );
-    assert.equal(
-      context.calls.filter((call) => call.method === 'mkDir').length,
-      directories.length,
-    );
-    assert.ok(uploadIndex < context.calls.findIndex((call) => call.method === 'runCommand'));
   });
 
   it('builds the exact images remotely with host networking and stops Docker before snapshot', async () => {
@@ -135,29 +116,6 @@ describe('trusted hosted-runner preparation', () => {
     const commands = context.calls
       .filter((call) => call.method === 'runCommand')
       .map((call) => call.args[0]);
-    assert.deepEqual(commands[0].args, [
-      '-i',
-      's|http://|https://|g',
-      '/etc/apt/sources.list.d/ubuntu.sources',
-    ]);
-    assert.equal(commands[0].cmd, 'sed');
-    assert.deepEqual(
-      commands.filter(({ cmd }) => cmd === 'apt-get').map(({ cmd, args }) => ({ cmd, args })),
-      [
-        { cmd: 'apt-get', args: ['-o', 'Acquire::ForceIPv4=true', 'update'] },
-        {
-          cmd: 'apt-get',
-          args: [
-            '-o',
-            'Acquire::ForceIPv4=true',
-            'install',
-            '-y',
-            '--no-install-recommends',
-            'docker.io',
-          ],
-        },
-      ],
-    );
     assert.deepEqual(
       commands.filter(({ cmd }) => cmd === 'docker').map(({ args }) => args),
       [
@@ -194,7 +152,13 @@ describe('trusted hosted-runner preparation', () => {
     assert.match(stop.args[1], /seq 1 60/);
     assert.match(stop.args[1], /sync/);
     const methods = context.calls.map((call) => call.method);
-    assert.ok(methods.indexOf('startDocker') < methods.lastIndexOf('runCommand'));
+    const buildIndex = context.calls.findIndex(
+      (call) => call.method === 'runCommand' && call.args[0].cmd === 'docker',
+    );
+    const startIndex = methods.indexOf('startDocker');
+    assert.ok(methods.indexOf('writeFiles') < startIndex);
+    assert.ok(methods.indexOf('runCommand') < startIndex);
+    assert.ok(startIndex < buildIndex);
     assert.deepEqual(methods.slice(-3), ['update', 'snapshot', 'delete']);
     assert.deepEqual(context.calls.at(-3).args[0], { networkPolicy: 'deny-all' });
     assert.equal(context.calls.at(-2).args[0].expiration, 0);

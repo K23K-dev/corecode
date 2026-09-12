@@ -24,11 +24,8 @@ describe('local and hosted execution routing', () => {
       vi.stubGlobal('location', { origin: 'http://127.0.0.1:5173' });
       const fetcher = vi.fn().mockResolvedValue(Response.json(result));
       vi.stubGlobal('fetch', fetcher);
-      const onStage = vi.fn();
       const runner = new PracticeRunner();
-      expect(await runner.run({ ...exercise, runtime }, 'pass', 'submit', '', onStage)).toEqual(
-        result,
-      );
+      expect(await runner.run({ ...exercise, runtime }, 'pass', 'submit', '')).toEqual(result);
       expect(fetcher).toHaveBeenCalledOnce();
       const [path, options] = fetcher.mock.calls[0];
       expect(path).toBe('/api/run');
@@ -43,8 +40,7 @@ describe('local and hosted execution routing', () => {
         code: 'pass',
         mode: 'submit',
       });
-      expect(onStage.mock.calls).toEqual([['running']]);
-      runner.dispose();
+      runner.cancel();
       expect(options.signal.aborted).toBe(false);
     },
   );
@@ -56,9 +52,7 @@ describe('local and hosted execution routing', () => {
       const fetcher = vi.fn().mockResolvedValue(Response.json(result));
       vi.stubGlobal('fetch', fetcher);
       const runner = new PracticeRunner();
-      expect(await runner.run({ ...exercise, runtime }, 'code', 'submit', '', vi.fn())).toEqual(
-        result,
-      );
+      expect(await runner.run({ ...exercise, runtime }, 'code', 'submit', '')).toEqual(result);
       const [path, options] = fetcher.mock.calls[0];
       expect(path).toBe('/api/run');
       expect(JSON.parse(options.body)).toEqual({
@@ -80,7 +74,7 @@ describe('local and hosted execution routing', () => {
       };
       const fetcher = vi.fn().mockResolvedValue(Response.json(customResult));
       vi.stubGlobal('fetch', fetcher);
-      expect(await new PracticeRunner().run(exercise, 'code', 'custom', '(4,)', vi.fn())).toEqual(
+      expect(await new PracticeRunner().run(exercise, 'code', 'custom', '(4,)')).toEqual(
         customResult,
       );
       expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({
@@ -98,19 +92,19 @@ describe('local and hosted execution routing', () => {
       'fetch',
       vi.fn().mockResolvedValue(new Response('private html', { status: 401 })),
     );
-    await expect(new PracticeRunner().run(exercise, 'pass', 'submit', '', vi.fn())).rejects.toThrow(
+    await expect(new PracticeRunner().run(exercise, 'pass', 'submit', '')).rejects.toThrow(
       'sign in again',
     );
   });
 
   it('does not render a raw HTML upstream error', async () => {
     vi.stubGlobal('fetch', vi.fn().mockResolvedValue(new Response('<html>private html</html>')));
-    await expect(new PracticeRunner().run(exercise, 'pass', 'submit', '', vi.fn())).rejects.toThrow(
+    await expect(new PracticeRunner().run(exercise, 'pass', 'submit', '')).rejects.toThrow(
       'code execution API is unavailable',
     );
   });
 
-  it.each(['cancel', 'dispose'] as const)('aborts the active request on %s', async (action) => {
+  it('aborts the active request on cancel', async () => {
     vi.useFakeTimers();
     vi.stubGlobal('location', { origin: 'http://127.0.0.1:5173' });
     let observed: AbortSignal | undefined;
@@ -124,8 +118,8 @@ describe('local and hosted execution routing', () => {
       }),
     );
     const runner = new PracticeRunner();
-    const pending = runner.run(exercise, 'pass', 'submit', '', vi.fn());
-    runner[action]();
+    const pending = runner.run(exercise, 'pass', 'submit', '');
+    runner.cancel();
     expect(observed?.aborted).toBe(true);
     await expect(pending).rejects.toThrow('Canceled');
     expect(vi.getTimerCount()).toBe(0);
@@ -149,7 +143,7 @@ describe('local and hosted execution routing', () => {
         );
       }),
     );
-    const pending = new PracticeRunner().run(exercise, 'pass', 'submit', '', vi.fn());
+    const pending = new PracticeRunner().run(exercise, 'pass', 'submit', '');
     const rejected = expect(pending).rejects.toThrow('Timed out');
     await vi.advanceTimersByTimeAsync(timeoutMs - 1);
     expect(observed?.aborted).toBe(false);

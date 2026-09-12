@@ -97,6 +97,7 @@ describe.skipIf(process.env.CODE_PRACTICE_RUN_DB_TESTS !== '1')(
       const headers: Record<string, string> = ['PUT', 'POST'].includes(method)
         ? { Origin: ORIGIN, 'Content-Type': 'application/json', 'X-Code-Practice-Client': '1' }
         : {};
+      headers.Host = new URL(ORIGIN).host;
       for (const [key, value] of Object.entries(overrides)) {
         if (value === undefined) delete headers[key];
         else headers[key] = value;
@@ -136,7 +137,7 @@ describe.skipIf(process.env.CODE_PRACTICE_RUN_DB_TESTS !== '1')(
     });
 
     beforeAll(async () => {
-      backend = (await import(new URL('server/index.mjs', ROOT).href)) as Backend;
+      backend = (await import(new URL('tests/http-test-server.mjs', ROOT).href)) as Backend;
       isolated = await createIsolatedTestDatabase();
       client = new pg.Client({
         connectionString: isolated.connectionString,

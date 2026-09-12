@@ -4,7 +4,13 @@ import CodeEditor from './CodeEditor';
 import type { Exercise } from '../lib/exercises';
 import type { Attempt } from '../lib/progress';
 
-export type ProblemTab = 'question' | 'solution' | 'history';
+const PROBLEM_TABS = [
+  { id: 'question', label: 'Question', Icon: FileCode2 },
+  { id: 'solution', label: 'Solution', Icon: Code2 },
+  { id: 'history', label: 'Submissions', Icon: History },
+] as const;
+
+export type ProblemTab = (typeof PROBLEM_TABS)[number]['id'];
 
 type ProblemPanelProps = {
   exercise: Exercise;
@@ -15,8 +21,6 @@ type ProblemPanelProps = {
   onViewAttempt: (attempt: Attempt) => void;
 };
 
-const PROBLEM_TABS: readonly ProblemTab[] = ['question', 'solution', 'history'];
-
 export default function ProblemPanel({
   exercise,
   solved,
@@ -26,7 +30,7 @@ export default function ProblemPanel({
   onViewAttempt,
 }: ProblemPanelProps) {
   function navigateTabs(event: KeyboardEvent<HTMLDivElement>) {
-    const index = PROBLEM_TABS.indexOf(tab);
+    const index = PROBLEM_TABS.findIndex((item) => item.id === tab);
     let next: number;
 
     switch (event.key) {
@@ -47,7 +51,7 @@ export default function ProblemPanel({
     }
 
     event.preventDefault();
-    onTabChange(PROBLEM_TABS[next]);
+    onTabChange(PROBLEM_TABS[next].id);
     event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next].focus();
   }
 
@@ -59,40 +63,21 @@ export default function ProblemPanel({
         aria-label="Problem details"
         onKeyDown={navigateTabs}
       >
-        <button
-          role="tab"
-          id="tab-question"
-          aria-controls="question-content"
-          aria-selected={tab === 'question'}
-          tabIndex={tab === 'question' ? 0 : -1}
-          className={tab === 'question' ? 'active' : ''}
-          onClick={() => onTabChange('question')}
-        >
-          <FileCode2 size={16} /> Question
-        </button>
-        <button
-          role="tab"
-          id="tab-solution"
-          aria-controls="question-content"
-          aria-selected={tab === 'solution'}
-          tabIndex={tab === 'solution' ? 0 : -1}
-          className={tab === 'solution' ? 'active' : ''}
-          onClick={() => onTabChange('solution')}
-        >
-          <Code2 size={16} /> Solution
-        </button>
-        <button
-          role="tab"
-          id="tab-history"
-          aria-controls="question-content"
-          aria-selected={tab === 'history'}
-          tabIndex={tab === 'history' ? 0 : -1}
-          className={tab === 'history' ? 'active' : ''}
-          onClick={() => onTabChange('history')}
-        >
-          <History size={16} /> Submissions
-          {attempts.length > 0 && <small>{attempts.length}</small>}
-        </button>
+        {PROBLEM_TABS.map(({ id, label, Icon }) => (
+          <button
+            key={id}
+            role="tab"
+            id={`tab-${id}`}
+            aria-controls="question-content"
+            aria-selected={tab === id}
+            tabIndex={tab === id ? 0 : -1}
+            className={tab === id ? 'active' : ''}
+            onClick={() => onTabChange(id)}
+          >
+            <Icon size={16} /> {label}
+            {id === 'history' && attempts.length > 0 && <small>{attempts.length}</small>}
+          </button>
+        ))}
       </div>
       <div
         className="problem-content"
@@ -127,21 +112,27 @@ function Question({ exercise, solved }: { exercise: Exercise; solved: boolean })
       </div>
       <p className="problem-prompt">{exercise.prompt}</p>
       {exercise.examples?.map((example, index) => (
-        <div className="example" key={index}>
+        <div className="example" data-runtime={exercise.runtime} key={index}>
           <h2>Example {index + 1}:</h2>
-          <div className="example-code">
+          <div
+            className={
+              example.inputLabel || example.outputLabel
+                ? 'example-code example-scenario'
+                : 'example-code'
+            }
+          >
             <div>
-              <span>Input:</span>
+              <span>{example.inputLabel ?? 'Input'}:</span>
               <pre>{example.input}</pre>
             </div>
             <div>
-              <span>Output:</span>
+              <span>{example.outputLabel ?? 'Output'}:</span>
               <pre>{example.output}</pre>
             </div>
           </div>
         </div>
       ))}
-      {exercise.requirements && (
+      {!!exercise.requirements?.length && (
         <div className="requirements">
           <h2>Requirements:</h2>
           <ul>

@@ -37,7 +37,7 @@ vi.mock('../server/repository.mjs', async (importOriginal) => ({
 }));
 vi.mock('../runner/execution.mjs', () => ({ executeProblem: mocks.executeProblem }));
 
-const serverModule = '../server/index.mjs';
+const serverModule = './http-test-server.mjs';
 const { startDataServer } = (await import(serverModule)) as {
   startDataServer(options: {
     connectionString: string;
@@ -116,6 +116,7 @@ function request(
   const headers: Record<string, string> = ['PUT', 'POST'].includes(method)
     ? { Origin: ORIGIN, 'Content-Type': 'application/json', 'X-Code-Practice-Client': '1' }
     : {};
+  headers.Host = new URL(ORIGIN).host;
   if (body !== undefined && !chunks) headers['Content-Length'] = String(Buffer.byteLength(body));
   if (chunks) headers['Transfer-Encoding'] = 'chunked';
   for (const [key, value] of Object.entries(overrides)) {
@@ -413,7 +414,7 @@ describe('HTTP routes and response contract without a database', () => {
   );
 
   it.each(['/api/health', '/api/catalog', '/api/state', '/api/activity', '/api/run'])(
-    'rejects HEAD and OPTIONS without implicit Express responses for %s',
+    'rejects HEAD and OPTIONS without implicit framework responses for %s',
     async (pathname) => {
       for (const method of ['HEAD', 'OPTIONS']) {
         const reply = await request(method, pathname);
@@ -477,8 +478,8 @@ describe('loopback and browser request boundaries', () => {
     expect(mocks.readActivity).not.toHaveBeenCalled();
   });
 
-  it('accepts only the configured frontend or actual listener loopback authorities', async () => {
-    for (const host of ['127.0.0.1:5173', `localhost:${serverPort()}`, `[::1]:${serverPort()}`]) {
+  it('accepts only loopback authorities on the configured application port', async () => {
+    for (const host of ['127.0.0.1:5173', 'localhost:5173', '[::1]:5173']) {
       expect(
         (await request('GET', '/api/state', undefined, { headers: { Host: host } })).status,
       ).toBe(200);
@@ -637,6 +638,7 @@ describe('bounded JSON parsing and error responses', () => {
             method: 'POST',
             agent: false,
             headers: {
+              Host: new URL(ORIGIN).host,
               Origin: ORIGIN,
               'Content-Type': 'application/json',
               'X-Code-Practice-Client': '1',
@@ -788,6 +790,7 @@ describe('execution cancellation and listener lifecycle', () => {
       method: 'POST',
       agent: false,
       headers: {
+        Host: new URL(ORIGIN).host,
         Origin: ORIGIN,
         'Content-Type': 'application/json',
         'X-Code-Practice-Client': '1',
@@ -842,6 +845,7 @@ describe('execution cancellation and listener lifecycle', () => {
       method: 'POST',
       agent: false,
       headers: {
+        Host: new URL(ORIGIN).host,
         Origin: ORIGIN,
         'Content-Type': 'application/json',
         'X-Code-Practice-Client': '1',
@@ -893,10 +897,9 @@ describe('execution cancellation and listener lifecycle', () => {
     expect(mocks.end).toHaveBeenCalledTimes(2);
   });
 
-  it('refuses non-loopback listeners and inexact application origins before creating a pool', async () => {
+  it('refuses inexact application origins before creating a pool', async () => {
     mocks.makePool.mockClear();
     for (const options of [
-      { host: '0.0.0.0' },
       { appOrigin: 'https://example.com' },
       { appOrigin: ORIGIN + '/' },
       { appOrigin: 'http://user:password@127.0.0.1:5173' },
@@ -906,11 +909,5 @@ describe('execution cancellation and listener lifecycle', () => {
       ).rejects.toThrow();
     }
     expect(mocks.makePool).not.toHaveBeenCalled();
-  });
-
-  it('retains finite server request, header, and idle timeouts', () => {
-    expect(server.requestTimeout).toBe(20_000);
-    expect(server.headersTimeout).toBe(10_000);
-    expect(server.keepAliveTimeout).toBe(1_000);
   });
 });

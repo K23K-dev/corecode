@@ -40,7 +40,7 @@ test.describe('Fresh submission celebration', () => {
     page.on('pageerror', (error) => errors.push(error.message));
     const result = acceptedResult(catalog);
     await page.route('**/api/run', (route) => route.fulfill({ json: result }));
-    await page.goto(`/#${problemId}`);
+    await page.goto(`/problems/${problemId}`);
     const workspace = page.locator('.workspace-grid');
     const area = page.locator('.editor-area');
     const editor = area.getByRole('textbox');
@@ -131,7 +131,7 @@ test.describe('Fresh submission celebration', () => {
   }) => {
     await page.emulateMedia({ reducedMotion: 'reduce' });
     await page.route('**/api/run', (route) => route.fulfill({ json: acceptedResult(catalog) }));
-    await page.goto(`/#${problemId}`);
+    await page.goto(`/problems/${problemId}`);
     await page.getByRole('button', { name: 'Submit', exact: true }).click();
     const effect = page.locator('.editor-area .submission-celebration');
     const bursts = page.locator('.workspace-grid > .submission-confetti-bursts');
@@ -156,7 +156,7 @@ test.describe('Fresh submission celebration', () => {
     const accepted = acceptedResult(catalog);
     let result = { ...accepted, cases: accepted.cases.slice(0, 1) };
     await page.route('**/api/run', (route) => route.fulfill({ json: result }));
-    await page.goto(`/#${problemId}`);
+    await page.goto(`/problems/${problemId}`);
     await page.getByRole('button', { name: 'Run example', exact: true }).click();
     await expect(page.getByText('Example passed', { exact: true })).toBeVisible();
     await expect(page.locator(celebration)).toHaveCount(0);
@@ -208,7 +208,7 @@ test.describe('Fresh submission celebration', () => {
         await route.fulfill({ json: result }).catch(() => {});
         completed = true;
       });
-      await page.goto(`/#${problemId}`);
+      await page.goto(`/problems/${problemId}`);
       await Promise.all([
         page.waitForRequest((request) => request.url().endsWith('/api/run')),
         page.getByRole('button', { name: 'Submit', exact: true }).click(),
@@ -253,7 +253,7 @@ test.describe('Library presentation', () => {
     page,
     catalog,
   }) => {
-    await page.goto('/#library');
+    await page.goto('/');
     const library = page.getByRole('main', { name: 'Practice library' });
     await expect(library).toBeVisible();
     await expect(library.locator('.pl-content')).toHaveCSS('max-width', '870px');
@@ -279,7 +279,7 @@ test.describe('Library presentation', () => {
   }) => {
     const draft =
       '# keep this draft when opening a solution\ndef normalize_text(text):\n    pass\n';
-    await page.goto(`/#${problemId}`);
+    await page.goto(`/problems/${problemId}`);
     const editor = page.locator('.editor-area').getByRole('textbox');
     await editor.click();
     await page.keyboard.press('ControlOrMeta+A');
@@ -331,7 +331,7 @@ test.describe('Library presentation', () => {
       .nth(4)
       .getByRole('button', { name: 'View solution for Normalize text', exact: true })
       .click();
-    await expect(page).toHaveURL(new RegExp(`#${problemId}$`));
+    await expect(page).toHaveURL(`http://127.0.0.1:5173/problems/${problemId}?tab=solution`);
     await expect(page.getByRole('tab', { name: 'Solution', exact: true })).toHaveAttribute(
       'aria-selected',
       'true',
@@ -346,7 +346,7 @@ test.describe('Library presentation', () => {
       page,
     }) => {
       await page.setViewportSize({ width, height: 844 });
-      await page.goto('/#library');
+      await page.goto('/');
       const library = page.getByRole('main', { name: 'Practice library' });
       await expect(library).toBeVisible();
       await expect(library.locator(removedLibraryMetadata)).toHaveCount(0);
@@ -380,7 +380,7 @@ test.describe('Editor typography', () => {
   test('problem tabs retain the reference text and icon scale across viewport sizes', async ({
     page,
   }) => {
-    await page.goto('/#python-core-flatten-grid-01');
+    await page.goto('/problems/python-core-flatten-grid-01');
     const tabs = page.getByRole('tablist', { name: 'Problem details' }).getByRole('tab');
 
     for (const width of [1440, 980, 390, 320]) {
@@ -402,7 +402,7 @@ test.describe('Editor typography', () => {
   test('editable and reference editors have no active-row or gutter highlight', async ({
     page,
   }) => {
-    await page.goto('/#python-core-flatten-grid-01');
+    await page.goto('/problems/python-core-flatten-grid-01');
     const input = page.locator('.editor-area').getByRole('textbox');
     await input.click();
     await page.keyboard.press('ArrowDown');
@@ -429,7 +429,7 @@ test.describe('Editor typography', () => {
   });
 
   test('editor and reference use the same readable NeetCode-style code scale', async ({ page }) => {
-    await page.goto('/#python-core-flatten-grid-01');
+    await page.goto('/problems/python-core-flatten-grid-01');
     const editor = page.locator('.editor-area .cm-editor');
     await expect(editor).toHaveCSS('font-size', '16px');
     await expect(page.locator('.editor-area .cm-scroller')).toHaveCSS('line-height', '24px');
@@ -510,7 +510,7 @@ test.describe('Execution results', () => {
       // real Python pass/fail/custom runs against these same value-label contracts.
       let result: RunResult = { cases, stdout: 'checked rectangle dimensions\n', durationMs: 1 };
       await page.route('**/api/run', (route) => route.fulfill({ json: result }));
-      await page.goto(`/#${problemId}`);
+      await page.goto(`/problems/${problemId}`);
       if (width < 700)
         await page.getByRole('button', { name: 'Code & results', exact: true }).click();
       await expect(page.locator('.app')).toHaveAttribute('data-save-state', 'saved');
@@ -626,7 +626,7 @@ test.describe('Execution results', () => {
       durationMs: 1,
     };
     await page.route('**/api/run', (route) => route.fulfill({ json: result }));
-    await page.goto(`/#${problemId}`);
+    await page.goto(`/problems/${problemId}`);
     await page.getByRole('button', { name: 'Console', exact: true }).click();
     await page.getByRole('tab', { name: 'Custom input', exact: true }).click();
     await page.getByLabel('Function arguments', { exact: true }).fill('(3, 4)');

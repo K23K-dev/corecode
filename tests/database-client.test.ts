@@ -702,12 +702,20 @@ describe('explicit completion choices', () => {
     expect(api.state.writes).toHaveLength(2);
   });
 
-  it('does not infer completion merely from accepted attempts in an explicitly unsolved backup', async () => {
+  it('restores an independent copy without inferring completion from accepted history', async () => {
     const api = database();
     const client = await open(api);
-    client.restore({ version: 1, exercises: { problem: record('backup', DATE, [attempt(1)]) } });
+    const backup: ProgressData = {
+      version: 1,
+      exercises: { problem: record('backup', DATE, [attempt(1)]) },
+    };
+    client.restore(backup);
+    backup.exercises.problem.draft = 'changed after restore';
+    backup.exercises.problem.attempts[0].code = 'changed after restore';
     await client.flush();
     expect(api.state.progress.exercises.problem.solved).toBe(false);
+    expect(api.state.progress.exercises.problem.draft).toBe('backup');
+    expect(api.state.progress.exercises.problem.attempts).toEqual([attempt(1)]);
   });
 
   it.each(['accepted', 'toggle'] as const)(

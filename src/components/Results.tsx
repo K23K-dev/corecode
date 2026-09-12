@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import { Check, CircleAlert, CircleCheck, LoaderCircle, Terminal, X } from 'lucide-react';
-import type { RunResult, RunnerStage } from '../lib/practice-runner';
+import type { RunResult } from '../lib/practice-runner';
 
 export interface Execution {
   mode: 'example' | 'submit' | 'custom';
@@ -45,20 +45,20 @@ export function SubmissionCelebration() {
 
 export default function Results({
   execution,
-  stage,
+  running,
   stale = false,
 }: {
   execution: Execution | null;
-  stage: RunnerStage | null;
+  running: boolean;
   stale?: boolean;
 }) {
   const [active, setActive] = useState(0);
   useEffect(() => setActive(0), [execution]);
-  if (stage)
+  if (running)
     return (
       <div className="empty-state execution-pending" role="status">
         <LoaderCircle className="spin" size={25} />
-        <h3>{stage === 'loading' ? 'Starting the runner…' : 'Running your code…'}</h3>
+        <h3>Running your code…</h3>
         <p>You can stop this run at any time.</p>
       </div>
     );
