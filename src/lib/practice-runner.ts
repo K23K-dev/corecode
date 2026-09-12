@@ -1,9 +1,32 @@
 import type { Exercise } from './exercises';
-import { PythonRunner, type RunResult, type RunnerStage } from './runner';
 
-/** Local Python uses the separate browser origin; hosted runs use the private API. */
+export type TestCase = {
+  name: string;
+  args: string;
+  expected: string;
+  check?: 'unchanged' | 'independent_rows';
+};
+
+export type CaseResult = {
+  name: string;
+  input: string;
+  expected?: string;
+  actual?: string;
+  passed?: boolean;
+  error?: string;
+};
+
+export type RunResult = {
+  cases: CaseResult[];
+  stdout: string;
+  durationMs: number;
+  error?: string;
+};
+
+export type RunnerStage = 'loading' | 'running';
+
+/** Every exercise uses the private API and its configured isolated execution adapter. */
 export class PracticeRunner {
-  private python: PythonRunner | null = null;
   private request: AbortController | null = null;
   async run(
     exercise: Exercise,
@@ -13,18 +36,6 @@ export class PracticeRunner {
     onStage: (stage: RunnerStage) => void,
   ): Promise<RunResult> {
     const localApp = globalThis.location?.origin === 'http://127.0.0.1:5173';
-    if (localApp && (exercise.runtime === 'browser-python' || !exercise.runtime)) {
-      this.python ??= new PythonRunner();
-      return this.python.run(
-        {
-          code,
-          entryPoint: exercise.entryPoint!,
-          cases: mode === 'submit' ? exercise.cases! : exercise.cases!.slice(0, 1),
-          ...(mode === 'custom' ? { customArgs } : {}),
-        },
-        onStage,
-      );
-    }
     const controller = new AbortController();
     this.request = controller;
     onStage('running');
@@ -61,10 +72,8 @@ export class PracticeRunner {
   }
   cancel() {
     this.request?.abort();
-    this.python?.cancel();
   }
   dispose() {
     this.cancel();
-    this.python?.dispose();
   }
 }

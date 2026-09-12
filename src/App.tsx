@@ -35,8 +35,7 @@ import {
   type ProgressData,
 } from './lib/progress';
 import { OUTBOX_PREFIX, type Catalog, type ProgressClient } from './lib/database-client';
-import type { RunnerStage } from './lib/runner';
-import { PracticeRunner } from './lib/practice-runner';
+import { PracticeRunner, type RunnerStage } from './lib/practice-runner';
 
 type Pane = 'results' | 'input';
 

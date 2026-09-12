@@ -117,13 +117,6 @@ svg {
   align-items: center;
   text-decoration: none;
 }
-.brand-icon {
-  display: grid;
-  place-items: center;
-}
-.brand-light {
-  font-weight: 400;
-}
 .brand small {
   font-weight: 450;
   font-size: 10px;
@@ -132,22 +125,6 @@ svg {
   border-radius: 4px;
   padding: 2px 5px;
   margin-left: 3px;
-}
-.topbar-center {
-  color: var(--muted);
-  display: flex;
-  gap: 7px;
-  align-items: center;
-  margin-left: auto;
-}
-.local-indicator {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-  background: var(--sage);
-}
-.topbar-actions {
-  display: flex;
 }
 .button {
   display: inline-flex;
@@ -173,236 +150,11 @@ svg {
   min-height: 0;
 }
 /* Exercise rail and workspace layout. */
-.exercise-rail {
-  width: 255px;
-  min-width: 255px;
-  display: flex;
-  flex-direction: column;
-  padding-top: 25px;
-  border-right: 1px solid var(--border);
-  background: #191f28;
-}
-.rail-heading {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0 14px 0 22px;
-}
-.eyebrow {
-  font-size: 9px;
-  font-weight: 650;
-  color: #8895a8;
-  letter-spacing: 1.1px;
-}
-.rail-heading h2 {
-  font-size: 16px;
-  font-weight: 550;
-  margin-top: 7px;
-  letter-spacing: -0.2px;
-}
-.rail-progress {
-  font-size: 11px;
-  color: #a9b5c6;
-  margin: 21px 23px 8px;
-  display: flex;
-  justify-content: space-between;
-}
-.rail-progress strong {
-  font-weight: 400;
-  color: var(--muted);
-}
-.progress-track {
-  margin: 0 23px;
-  background: #303a48;
-  height: 3px;
-  border-radius: 3px;
-  overflow: hidden;
-}
-.progress-track span {
-  display: block;
-  height: 100%;
-  background: var(--sage);
-  transition: width 0.25s;
-}
-.search-field {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 0 10px;
-  color: var(--muted);
-}
-.search-field:focus-within {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-}
-.search-field input {
-  min-width: 0;
-  width: 100%;
-  border: 0;
-  outline: none;
-  background: none;
-  padding: 10px 0;
-}
-.search-field input:focus {
-  outline: none;
-}
-.rail-search {
-  margin: 25px 17px 12px;
-}
-.rail-filter {
-  display: flex;
-  margin: 0 17px 16px;
-  gap: 5px;
-}
-.rail-filter button {
-  border-radius: 4px;
-  font-size: 11px;
-  padding: 4px 10px;
-  color: var(--muted);
-}
-.rail-filter button.active {
-  background: #303a48;
-  color: var(--text);
-}
-.rail-filter button:hover {
-  color: var(--text);
-}
-.exercise-list {
-  overflow-y: auto;
-  min-height: 0;
-  padding: 0 9px 18px;
-  flex: 1;
-}
-.exercise-item {
-  width: 100%;
-  text-align: left;
-  display: flex;
-  gap: 11px;
-  align-items: center;
-  padding: 11px 11px;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  margin-bottom: 3px;
-}
-.exercise-item:hover {
-  background: #222b36;
-}
-.exercise-item.selected {
-  background: #2a3548;
-  border-color: #405272;
-}
-.exercise-item-text {
-  flex: 1;
-  min-width: 0;
-}
-.exercise-item-text strong {
-  font-size: 12px;
-  font-weight: 450;
-  line-height: 1.4;
-  display: block;
-}
-.exercise-item-text small {
-  display: block;
-  font-size: 10px;
-  color: #8c9bb0;
-  margin-top: 4px;
-}
-.exercise-item.selected .exercise-item-text strong {
-  color: #dbe6ff;
-}
-.exercise-mark {
-  color: #64748a;
-  display: flex;
-}
-.exercise-mark.solved,
-.solved {
-  color: var(--sage);
-}
-.difficulty-dot {
-  width: 4px;
-  height: 4px;
-  border-radius: 50%;
-  background: var(--muted);
-  flex-shrink: 0;
-}
-.difficulty-dot.easy {
-  background: var(--sage);
-}
-.difficulty-dot.medium {
-  background: var(--amber);
-}
-.difficulty-dot.hard {
-  background: var(--danger);
-}
-.rail-empty {
-  font-size: 12px;
-  color: var(--muted);
-  padding: 16px 12px;
-  line-height: 1.6;
-}
-.rail-library {
-  border-top: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 17px 20px;
-  color: #a6b4c8;
-  text-align: left;
-}
-.rail-library > span {
-  flex: 1;
-  font-size: 12px;
-  font-weight: 550;
-}
-.rail-library small {
-  display: block;
-  color: var(--muted);
-  font-size: 10px;
-  font-weight: 400;
-  margin-top: 4px;
-}
-.rail-library:hover {
-  background: #222b36;
-  color: var(--text);
-}
-.rail-collapsed .exercise-rail {
-  display: none;
-}
 .main-workspace {
   display: flex;
   flex-direction: column;
   flex: 1;
   min-width: 0;
-}
-.workspace-bar {
-  height: 49px;
-  min-height: 49px;
-  border-bottom: 1px solid var(--border);
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 0 19px;
-  gap: 10px;
-}
-.breadcrumb {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  min-width: 0;
-  font-size: 11px;
-  color: var(--muted);
-}
-.breadcrumb strong {
-  color: #bbc5d5;
-  font-weight: 400;
-  white-space: nowrap;
-  text-overflow: ellipsis;
-  overflow: hidden;
-}
-.breadcrumb > span {
-  white-space: nowrap;
 }
 .exercise-navigation {
   display: flex;
@@ -426,16 +178,6 @@ svg {
   border-right: 1px solid var(--border);
   background: #1b212a;
   overflow-y: auto;
-}
-.panel-label {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  padding: 14px 24px;
-  font-size: 11px;
-  color: #a8b4c6;
-  border-bottom: 1px solid #2b3440;
-  min-height: 48px;
 }
 .problem-content {
   padding: 27px 27px 20px;
@@ -484,37 +226,6 @@ h1 {
   display: block;
   margin-bottom: 5px;
 }
-.environment-note {
-  border-top: 1px solid #303946;
-}
-.environment-note h2 {
-  margin-bottom: 8px;
-}
-.environment-note > span {
-  display: block;
-  margin-top: 10px;
-}
-.reference-section {
-  margin-top: 27px;
-  border-top: 1px solid #303946;
-}
-.reference-toggle {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 17px 0 4px;
-  width: 100%;
-  text-align: left;
-}
-.reference-toggle > svg:last-child {
-  margin-left: auto;
-}
-.reference-toggle:hover {
-  color: var(--accent);
-}
-.rotated {
-  transform: rotate(90deg);
-}
 .reference-code > p {
   color: #d4d4d4;
   margin-bottom: 20px;
@@ -531,10 +242,6 @@ h1 {
 }
 .reference-code .cm-line {
   padding-right: 10px !important;
-}
-.problem-footer {
-  padding: 14px 24px;
-  border-top: 1px solid #29323e;
 }
 /* Editor and action controls. */
 .coding-panel {
@@ -575,17 +282,6 @@ h1 {
 }
 .action-bar > div {
   display: flex;
-}
-.save-status {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  color: #8697af;
-  font-size: 10px;
-  white-space: nowrap;
-}
-.save-warning {
-  color: var(--amber);
 }
 /* Execution results, custom inputs, and submission history. */
 .result-panel {
@@ -641,17 +337,6 @@ h1 {
 .empty-state > .button {
   margin-top: 8px;
 }
-.workspace-footer {
-  min-height: 27px;
-  font-size: 9px;
-  color: #8091aa;
-  padding: 6px 17px;
-  display: flex;
-  justify-content: space-between;
-  border-top: 1px solid #29323f;
-  background: var(--base);
-  gap: 9px;
-}
 .result-heading {
   display: flex;
   align-items: center;
@@ -669,12 +354,6 @@ h1 {
 }
 .failure {
   color: var(--danger);
-}
-.result-note {
-  font-size: 10px;
-  line-height: 1.65;
-  color: #97a7be;
-  margin-top: 11px;
 }
 .stale-result {
   color: var(--amber);
@@ -877,69 +556,6 @@ h1 {
   gap: 10px;
   padding: 21px 25px;
 }
-.library-filters {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 9px;
-  margin: 0 25px 17px;
-}
-.library-search {
-  flex: 1;
-  min-width: 200px;
-}
-.library-filters select {
-  border: 1px solid #46536a;
-  border-radius: 6px;
-  padding: 7px 9px;
-  max-width: 205px;
-}
-.library-count {
-  padding: 0 26px 15px;
-  display: flex;
-  justify-content: space-between;
-  gap: 15px;
-  font-size: 10px;
-}
-.library-count span {
-  font-size: 10px;
-}
-.library-list {
-  min-height: 150px;
-  overflow: auto;
-  border-top: 1px solid #354258;
-  padding: 0 15px 14px;
-}
-.library-row {
-  display: grid;
-  grid-template-columns: 22px minmax(0, 1fr) 66px 100px 18px;
-  align-items: center;
-  gap: 15px;
-  padding: 14px 11px;
-  width: 100%;
-  text-align: left;
-  border-bottom: 1px solid #303b4d;
-  border-radius: 3px;
-}
-.library-state {
-  display: flex;
-}
-.library-title {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-.library-title strong {
-  font-size: 12px;
-  font-weight: 450;
-  line-height: 1.6;
-}
-.library-title small {
-  font-size: 10px;
-  margin-top: 3px;
-}
-.availability {
-  font-size: 10px;
-}
 .local-progress-hero {
   padding: 0 26px;
 }
@@ -1020,12 +636,6 @@ h1 {
   border: 1px solid #40516d;
   border-radius: 7px;
 }
-.imported-example {
-  font-size: 12px;
-  color: #acbdd7;
-  padding-left: 13px;
-  border-left: 2px solid #415879;
-}
 /* Motion and responsive foundations; theme-specific breakpoints remain last. */
 .spin {
   animation: spin 1.1s linear infinite;
@@ -1036,47 +646,17 @@ h1 {
   }
 }
 @media (min-width: 1700px) {
-  .exercise-rail {
-    width: 275px;
-    min-width: 275px;
-  }
   .workspace-grid {
     grid-template-columns: minmax(370px, 0.75fr) minmax(500px, 1.3fr);
   }
   .problem-content {
     padding: 34px 36px;
   }
-  .exercise-item-text strong {
-    font-size: 13px;
-  }
   .result-panel {
     max-height: 43%;
   }
 }
 @media (max-width: 1180px) {
-  .exercise-rail {
-    width: 219px;
-    min-width: 219px;
-  }
-  .rail-heading {
-    padding-left: 17px;
-  }
-  .rail-heading h2 {
-    font-size: 14px;
-  }
-  .rail-heading .icon-button {
-    width: 22px;
-  }
-  .rail-heading .eyebrow {
-    font-size: 8px;
-  }
-  .exercise-item {
-    padding: 10px 7px;
-    gap: 9px;
-  }
-  .exercise-item-text strong {
-    font-size: 11px;
-  }
   .workspace-grid {
     grid-template-columns: minmax(280px, 0.85fr) minmax(370px, 1.3fr);
   }
@@ -1086,31 +666,13 @@ h1 {
   h1 {
     font-size: 23px;
   }
-  .workspace-footer > span:last-child {
-    display: none;
-  }
-  .save-status {
-    font-size: 9px;
-  }
   .action-bar {
     padding: 10px 13px;
   }
 }
 @media (max-width: 980px) {
-  .exercise-rail {
-    display: none;
-  }
-  .mobile-library {
-    display: inline-flex;
-  }
   .workspace-grid {
     grid-template-columns: minmax(290px, 0.9fr) minmax(370px, 1.2fr);
-  }
-  .breadcrumb .icon-button[aria-label='Show exercise list'] {
-    display: none;
-  }
-  .topbar-center {
-    display: none;
   }
 }
 @media (max-width: 700px) {
@@ -1121,32 +683,10 @@ h1 {
   .brand small {
     display: none;
   }
-  .topbar-actions .button {
-    padding: 8px;
-  }
-  .topbar-actions .button > span {
-    display: none;
-  }
-  .topbar-actions button::after {
-    font-size: 11px;
-  }
   .app-body,
   .main-workspace {
     overflow: visible;
     display: block;
-  }
-  .workspace-bar {
-    padding: 0 10px;
-    height: 44px;
-    min-height: 44px;
-  }
-  .breadcrumb {
-    gap: 6px;
-    font-size: 10px;
-  }
-  .breadcrumb > strong,
-  .breadcrumb > svg {
-    display: none;
   }
   .exercise-navigation .icon-button {
     width: 27px;
@@ -1176,9 +716,6 @@ h1 {
     border-right: 0;
     overflow: visible;
   }
-  .problem-panel .panel-label {
-    display: none;
-  }
   .problem-content {
     padding: 28px 23px;
   }
@@ -1196,16 +733,9 @@ h1 {
     padding: 10px 12px;
     min-height: 57px;
   }
-  .save-status {
-    font-size: 9px;
-    gap: 4px;
-  }
   .result-panel {
     min-height: 245px;
     max-height: 48%;
-  }
-  .workspace-footer {
-    display: none;
   }
   .modal {
     max-height: 89dvh;
@@ -1221,57 +751,6 @@ h1 {
   .modal-description {
     padding: 0 19px 17px;
     font-size: 11px;
-  }
-  .library-filters {
-    margin: 0 17px 15px;
-    gap: 7px;
-  }
-  .library-search {
-    flex-basis: 100%;
-  }
-  .library-filters select {
-    flex: 1;
-    min-width: 90px;
-    max-width: 100%;
-    padding: 8px 5px;
-  }
-  .library-count {
-    padding: 0 19px 13px;
-    display: block;
-    line-height: 1.65;
-  }
-  .library-count span {
-    display: block;
-    margin-top: 4px;
-  }
-  .library-list {
-    padding: 0 9px 12px;
-  }
-  .library-row {
-    grid-template-columns: 17px minmax(0, 1fr) 51px;
-    gap: 5px 9px;
-    padding: 13px 7px;
-  }
-  .library-row > svg:last-child {
-    display: none;
-  }
-  .library-row .availability {
-    grid-column: 2;
-    grid-row: 2;
-    font-size: 9px;
-  }
-  .library-row .library-state {
-    align-self: start;
-    margin-top: 3px;
-  }
-  .library-title strong {
-    font-size: 11px;
-  }
-  .library-row .difficulty {
-    align-self: start;
-    margin-top: 4px;
-    font-size: 9px;
-    padding: 3px 5px;
   }
   .local-progress-hero {
     padding: 0 20px;

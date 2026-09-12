@@ -175,9 +175,9 @@ def python_case(code, case, dependencies):
     assert exact(actual, expected), f'Returned {actual!r}'
     if case.get('unchangedArgs'):
         assert exact(args, original), 'Input arguments were modified'
-    if case.get('independentRows') and len(actual) > 1 and actual[0]:
-        actual[0][0] = 987654321
-        assert all(row[0] != 987654321 for row in actual[1:]), 'Rows share the same list'
+    if case.get('independentRows'):
+        independent = type(actual) is list and all(type(row) is list for row in actual)
+        assert independent and len({id(row) for row in actual}) == len(actual), 'Rows share the same list'
     return repr(expected)[:4000]
 
 

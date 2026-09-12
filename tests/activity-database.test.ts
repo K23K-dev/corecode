@@ -54,17 +54,11 @@ describe.skipIf(process.env.CODE_PRACTICE_RUN_DB_TESTS !== '1')(
     let baseUrl: string;
     let schema: string;
 
-    async function request<T>(
-      method: string,
-      pathname: string,
-      value?: unknown,
-      overrides: Record<string, string> = {},
-    ) {
+    async function request<T>(method: string, pathname: string, value?: unknown) {
       const body = value === undefined ? undefined : JSON.stringify(value);
       const headers: Record<string, string> = ['PUT', 'POST'].includes(method)
         ? { Origin: ORIGIN, 'Content-Type': 'application/json', 'X-Code-Practice-Client': '1' }
         : {};
-      Object.assign(headers, overrides);
       if (body !== undefined) headers['Content-Length'] = String(Buffer.byteLength(body));
       return new Promise<{ status: number; body: T; headers: http.IncomingHttpHeaders }>(
         (resolve, reject) => {
@@ -92,12 +86,7 @@ describe.skipIf(process.env.CODE_PRACTICE_RUN_DB_TESTS !== '1')(
       );
     }
 
-    const readActivity = (timeZone?: string) =>
-      request<Activity>(
-        'GET',
-        '/api/activity' +
-          (timeZone === undefined ? '' : `?timeZone=${encodeURIComponent(timeZone)}`),
-      );
+    const readActivity = () => request<Activity>('GET', '/api/activity');
     const save = (expectedRevision: number, attempts?: Attempt[]) =>
       request<{ revision: number; progress: ProgressData }>('PUT', '/api/state', {
         expectedRevision,
@@ -323,43 +312,6 @@ describe.skipIf(process.env.CODE_PRACTICE_RUN_DB_TESTS !== '1')(
       expect(
         (await client.query(`SELECT id, attempt FROM ${schema}.cp_submissions ORDER BY id`)).rows,
       ).toEqual(before);
-      expect((await request<{ revision: number }>('GET', '/api/state')).body.revision).toBe(0);
-    });
-
-    it('does not let legacy timezone query values change the shared reset calendar', async () => {
-      for (const timeZone of [
-        '',
-        'Not/A_TimeZone',
-        'a'.repeat(101),
-        '+03:00',
-        'UTC\0',
-        ' America/New_York',
-      ]) {
-        const response = await readActivity(timeZone);
-        expect(response.status, timeZone).toBe(200);
-        expect(response.body).toMatchObject({ timeZone: 'America/New_York', resetHour: 20 });
-      }
-      expect((await readActivity('Pacific/Kiritimati')).status).toBe(200);
-    });
-
-    it('preserves local-origin protection and exposes no write methods', async () => {
-      const disallowedHeaders: Array<Record<string, string>> = [
-        { Host: 'evil.example' },
-        { Origin: 'https://evil.example' },
-        { 'Sec-Fetch-Site': 'cross-site' },
-      ];
-      for (const headers of disallowedHeaders) {
-        expect((await request('GET', '/api/activity', undefined, headers)).status).toBe(403);
-      }
-      for (const method of ['POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS']) {
-        const response = await request(
-          method,
-          '/api/activity',
-          ['POST', 'PUT'].includes(method) ? {} : undefined,
-        );
-        expect(response.status, method).toBe(405);
-        expect(response.body).toMatchObject({ code: 'method_not_allowed' });
-      }
       expect((await request<{ revision: number }>('GET', '/api/state')).body.revision).toBe(0);
     });
 

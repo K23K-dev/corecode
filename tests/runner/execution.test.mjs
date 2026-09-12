@@ -417,6 +417,9 @@ describe('isolated execution boundary', { concurrency: false }, () => {
     const run = calls[0];
     run.child.stderr.write(Buffer.alloc(16_384, 120));
     run.child.stderr.write('private diagnostics');
+    assert.equal(run.child.stderr.readableFlowing, true);
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(run.child.stderr.readableLength, 0);
     complete(run, JSON.stringify(result()).padEnd(512_000, ' '));
     assert.deepEqual(await pending, result());
     assert.equal(run.child.killed, false);

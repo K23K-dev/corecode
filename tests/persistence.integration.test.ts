@@ -454,73 +454,24 @@ describe.skipIf(process.env.CODE_PRACTICE_RUN_DB_TESTS !== '1')(
       ).toBe(0);
     });
 
-    it('applies the same browser and size guards to execution without running submitted code', async () => {
-      const invalid = JSON.stringify({ problemId: 'unknown-problem' });
-      expect((await request('POST', '/api/run', invalid, { Origin: undefined })).status).toBe(403);
-      expect(
-        (await request('POST', '/api/run', invalid, { Origin: 'https://evil.example' })).status,
-      ).toBe(403);
-      expect(
-        (await request('POST', '/api/run', invalid, { 'X-Code-Practice-Client': undefined }))
-          .status,
-      ).toBe(403);
-      expect(
-        (await request('POST', '/api/run', invalid, { 'Content-Type': 'text/plain' })).status,
-      ).toBe(415);
-      expect((await request('POST', '/api/run', '{broken')).status).toBe(400);
-      expect(
-        (await request('POST', '/api/run', Buffer.alloc(10 * 1024 * 1024 + 1, 32))).status,
-      ).toBe(413);
-      expect((await request('GET', '/api/run')).status).toBe(405);
-      expect((await readState()).body.revision).toBe(0);
-    });
-
-    it('enforces origin, host, client marker, and media-type guards before writes', async () => {
-      const body = JSON.stringify(update(0));
-      expect((await request('PUT', '/api/state', body, { Origin: undefined })).status).toBe(403);
-      expect(
-        (await request('PUT', '/api/state', body, { Origin: 'https://evil.example' })).status,
-      ).toBe(403);
-      expect(
-        (await request('PUT', '/api/state', body, { 'X-Code-Practice-Client': undefined })).status,
-      ).toBe(403);
-      expect(
-        (await request('PUT', '/api/state', body, { 'Content-Type': 'text/plain' })).status,
-      ).toBe(415);
-      expect((await request('GET', '/api/state', undefined, { Host: 'evil.example' })).status).toBe(
-        403,
-      );
-      expect(
-        (await request('GET', '/api/state', undefined, { 'Sec-Fetch-Site': 'cross-site' })).status,
-      ).toBe(403);
-      expect((await readState()).body.revision).toBe(0);
-    });
-
-    it('rejects malformed JSON, unsafe keys, invalid state, and oversized bodies without mutations', async () => {
-      expect((await request('PUT', '/api/state', '{broken')).status).toBe(400);
-      expect((await request('PUT', '/api/state', Buffer.from([0xc3, 0x28]))).status).toBe(400);
+    it('leaves stored progress and immutable history untouched when writes are rejected', async () => {
+      // Exhaustive HTTP guard cases live in http-server.test.ts; this checks the real storage boundary.
+      const saved = (await writeState(update(0, progress([attempt(0)])))).body;
+      const archived = (
+        await client.query(`SELECT id, attempt FROM ${schema}.cp_submissions ORDER BY id`)
+      ).rows;
       expect(
         (
-          await request(
-            'PUT',
-            '/api/state',
-            '{"expectedRevision":0,"progress":{"version":1,"exercises":{"__proto__":{}}},"stars":[]}',
-          )
+          await request('PUT', '/api/state', JSON.stringify(update(saved.revision)), {
+            'X-Code-Practice-Client': undefined,
+          })
         ).status,
-      ).toBe(400);
-      expect((await writeState({ ...update(0), expectedRevision: -1 })).status).toBe(400);
+      ).toBe(403);
+      expect((await writeState(update(-1))).status).toBe(400);
+      expect((await readState()).body).toEqual(saved);
       expect(
-        (await request('PUT', '/api/state', Buffer.alloc(10 * 1024 * 1024 + 1, 32))).status,
-      ).toBe(413);
-      expect((await readState()).body).toEqual({
-        revision: 0,
-        progress: EMPTY,
-        stars: [],
-        migrations: [],
-        writes: [],
-      });
-      expect((await request('POST', '/api/state', '{}')).status).toBe(405);
-      expect((await request('GET', '/api/not-a-route')).status).toBe(404);
+        (await client.query(`SELECT id, attempt FROM ${schema}.cp_submissions ORDER BY id`)).rows,
+      ).toEqual(archived);
     });
 
     it('returns an explicit storage-unavailable response instead of inventing successful state', async () => {

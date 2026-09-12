@@ -1,5 +1,4 @@
 """Disposable Linux fixtures. This file is executed only inside the container."""
-import contextlib
 import io
 import json
 import os
@@ -108,7 +107,6 @@ def shell_case(code, case):
                 os.close(master)
                 output=b''.join(chunks).decode(errors='replace')
                 scope['was_running']=was_running
-                status=0
             else:
                 # Files cap stdout/stderr using RLIMIT_FSIZE; parent also caps JSON.
                 with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:

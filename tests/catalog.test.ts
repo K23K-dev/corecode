@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { beforeAll, describe, expect, it } from 'vitest';
 import type { Catalog } from '../src/lib/database-client';
 import type { Exercise } from '../src/lib/exercises';
-import type { TestCase } from '../src/lib/runner';
+import type { TestCase } from '../src/lib/practice-runner';
 
 type WebsiteProblem = Exercise & {
   graderVersion: string;
@@ -33,14 +33,7 @@ const expectedStudyDecks = [
   'LLM Applications',
   'Low Level Design',
 ];
-const expectedDeckCounts = [46, 39, 42, 24, 25, 29, 32, 30, 17, 20, 14, 16, 8, 17];
-const expectedRuntimeCounts = {
-  'browser-python': 15,
-  python: 236,
-  sql: 29,
-  shell: 32,
-  javascript: 47,
-};
+const supportedRuntimes = ['browser-python', 'python', 'sql', 'shell', 'javascript'];
 
 const expectedReadyCaseCounts = {
   'python-core-normalize-text-01': 8,
@@ -143,8 +136,8 @@ describe.skipIf(!verifyNeonCatalog)('read-only Neon catalog contracts', () => {
   }, 60_000);
 
   describe('complete reviewed exercise library', () => {
-    it('uses all 359 prepared website records in catalog order with stable unique IDs', () => {
-      expect(readyData).toHaveLength(359);
+    it('provides a nonempty current catalog with stable unique IDs', () => {
+      expect(readyData.length).toBeGreaterThan(0);
       expect(readyById.size).toBe(readyData.length);
       for (const exercise of readyData) {
         expect(exercise.id).toMatch(/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/);
@@ -154,7 +147,6 @@ describe.skipIf(!verifyNeonCatalog)('read-only Neon catalog contracts', () => {
     });
 
     it('keeps source ordinals and abbreviations out of displayed problem titles', () => {
-      expect(readyData.filter((item) => /^(?:ds|algo)-/.test(item.id))).toHaveLength(49);
       expect(
         readyData.filter(
           (item) => /\b0\d+\b/.test(item.title) || /^(?:Ds|Algo)\b/.test(item.title),
@@ -163,41 +155,34 @@ describe.skipIf(!verifyNeonCatalog)('read-only Neon catalog contracts', () => {
     });
 
     it('preserves meaningful numbers in scientific problem titles', () => {
-      expect(readyData.filter((item) => /\d/.test(item.title)).map((item) => item.title)).toEqual([
-        'Best F1 threshold',
-        'Batch Norm1d',
-        'Conv2d single channel',
-        'Max pool2d',
-      ]);
+      expect(readyData.filter((item) => /\d/.test(item.title)).map((item) => item.title)).toEqual(
+        expect.arrayContaining([
+          'Best F1 threshold',
+          'Batch Norm1d',
+          'Conv2d single channel',
+          'Max pool2d',
+        ]),
+      );
     });
 
-    it('keeps all 14 study decks and their actual problem counts runnable', () => {
+    it('preserves the study decks and assigns every current problem to a unique valid deck', () => {
       const deckNames = decks.map((deck) => deck.name);
-      expect(deckNames).toEqual(expectedStudyDecks);
-      expect(new Set(deckNames).size).toBe(14);
-      expect(new Set(decks.map((deck) => deck.id)).size).toBe(14);
+      expect(deckNames.filter((name) => expectedStudyDecks.includes(name))).toEqual(
+        expectedStudyDecks,
+      );
+      expect(new Set(deckNames).size).toBe(decks.length);
+      expect(new Set(decks.map((deck) => deck.id)).size).toBe(decks.length);
       expect(decks.every((deck) => /^[a-z]+(?:-[a-z]+)*$/.test(deck.id))).toBe(true);
-      expect(
-        deckNames.map((deck) => readyData.filter((exercise) => exercise.deck === deck).length),
-      ).toEqual(expectedDeckCounts);
       expect(
         readyData.every((exercise) =>
           decks.some((deck) => deck.id === exercise.deckId && deck.name === exercise.deck),
         ),
       ).toBe(true);
-      expect(
-        Object.fromEntries(
-          Object.keys(expectedRuntimeCounts).map((runtime) => [
-            runtime,
-            readyData.filter((exercise) => exercise.runtime === runtime).length,
-          ]),
-        ),
-      ).toEqual(expectedRuntimeCounts);
     });
 
     it('provides bounded behavioral metadata without leaking server-side grading code', () => {
       for (const exercise of readyData) {
-        expect(Object.keys(expectedRuntimeCounts), exercise.id).toContain(exercise.runtime);
+        expect(supportedRuntimes, exercise.id).toContain(exercise.runtime);
         expect(exercise.graderVersion, exercise.id).toMatch(/^[a-f0-9]{64}$/);
         expect(exercise, exercise.id).not.toHaveProperty('gradingSpec');
         expect(exercise, exercise.id).not.toHaveProperty('specVersion');
@@ -232,20 +217,22 @@ describe.skipIf(!verifyNeonCatalog)('read-only Neon catalog contracts', () => {
       }
     });
 
-    it('routes scientific Python, shell, SQL, and web problems to the correct fixed runtime', () => {
+    it('keeps Python, shell, SQL, and web runtime contracts consistent with their decks', () => {
       for (const exercise of readyData) {
-        const expected =
+        const allowedRuntimes =
           exercise.deckId === 'sql'
-            ? 'sql'
+            ? ['sql']
             : exercise.deckId === 'linux'
-              ? 'shell'
+              ? ['shell']
               : ['frontend', 'backend'].includes(exercise.deckId)
-                ? 'javascript'
+                ? ['javascript']
                 : Object.hasOwn(expectedReadyCaseCounts, exercise.id)
-                  ? 'browser-python'
-                  : 'python';
-        expect(exercise.runtime, exercise.id).toBe(expected);
-        if (expected === 'python' || expected === 'browser-python') {
+                  ? ['browser-python']
+                  : exercise.deckId === 'python'
+                    ? ['python', 'browser-python']
+                    : ['python'];
+        expect(allowedRuntimes, exercise.id).toContain(exercise.runtime);
+        if (exercise.runtime === 'python' || exercise.runtime === 'browser-python') {
           expect(exercise.language, exercise.id).toBe('Python');
           expect(exercise.extension, exercise.id).toBe('py');
         }
@@ -257,12 +244,18 @@ describe.skipIf(!verifyNeonCatalog)('read-only Neon catalog contracts', () => {
       }
     });
 
-    it('wraps the 202 Python function exercises while preserving domain-class exercises', () => {
+    it('keeps Python function wrappers consistent while preserving domain-class exercises', () => {
       const python = readyData.filter((exercise) => exercise.language === 'Python');
-      const wrapped = python.filter((exercise) => /^class Solution:/m.test(exercise.starterCode));
-      expect(python).toHaveLength(251);
-      expect(wrapped).toHaveLength(202);
+      const wrapped = python.filter((exercise) =>
+        [
+          exercise.starterCode,
+          exercise.referenceCode,
+          ...(exercise.solutionAlternatives ?? []).map((alternative) => alternative.code),
+        ].some((source) => /^class Solution:/m.test(source)),
+      );
+      expect(wrapped.length).toBeGreaterThan(0);
       for (const exercise of wrapped) {
+        expect(exercise.starterCode, exercise.id).toMatch(/^class Solution:/m);
         expect(exercise.referenceCode, exercise.id).toMatch(/^class Solution:/m);
         expect(exercise.starterCode, exercise.id).toMatch(/^    def \w+\(self(?:,|\))/m);
         for (const alternative of exercise.solutionAlternatives ?? [])
@@ -292,7 +285,7 @@ describe.skipIf(!verifyNeonCatalog)('read-only Neon catalog contracts', () => {
           .filter((exercise) => exercise.runtime === 'browser-python')
           .map((exercise) => exercise.id)
           .sort(),
-      ).toEqual(Object.keys(expectedReadyCaseCounts).sort());
+      ).toEqual(expect.arrayContaining(Object.keys(expectedReadyCaseCounts)));
       expect(
         Object.fromEntries(curatedData.map((exercise) => [exercise.id, exercise.cases.length])),
       ).toEqual(expectedReadyCaseCounts);

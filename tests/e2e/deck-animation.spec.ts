@@ -1,4 +1,7 @@
-import { expect, test } from '@playwright/test';
+import { expect, test } from './fixtures';
+import { practiceClock, summarizeActivity } from '../../shared/practice-activity.mjs';
+
+test.use({ timezoneId: 'America/New_York', locale: 'en-US' });
 
 // These checks only navigate the library; they do not submit code or change progress.
 test('deck reveal uses natural height, rotates its chevron, and excludes collapsed controls', async ({
@@ -111,11 +114,22 @@ test('reduced motion disables both panel and chevron transitions', async ({ page
 });
 
 test('deck disclosure reuses unchanged problem rows and tracker calculations', async ({ page }) => {
+  const fixedTime = '2026-09-08T12:00:00.000Z';
+  const clock = practiceClock(new Date(fixedTime));
+  const days = [{ date: '2026-09-07', count: 1 }];
   await page.emulateMedia({ reducedMotion: 'reduce' });
-  await page.clock.setFixedTime('2026-09-08T12:00:00.000Z');
-  await page.route('**/api/activity?*', (route) =>
+  await page.clock.setFixedTime(fixedTime);
+  await page.route(/\/api\/activity(?:\?.*)?$/, (route) =>
     route.fulfill({
-      json: { days: [{ date: '2026-09-07', count: 1 }] },
+      json: {
+        timeZone: 'America/New_York',
+        resetHour: 20,
+        ...clock,
+        serverNow: fixedTime,
+        days,
+        repairs: [],
+        streak: summarizeActivity(days, [], clock.today),
+      },
     }),
   );
   await page.addInitScript(() => {

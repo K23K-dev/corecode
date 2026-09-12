@@ -7,7 +7,6 @@ const MAX_CODE_CHARACTERS = 32_768;
 const MAX_CODE_BYTES = 51_200;
 const MAX_CUSTOM_INPUT_CHARACTERS = 8_192;
 const MAX_OUTPUT_BYTES = 512_000;
-const STDERR_CAPTURE_THRESHOLD = 8_192;
 const MAX_RESULT_CASES = 32;
 const MAX_RUNNER_PAYLOAD_BYTES = 1024 * 1024;
 const MAX_ACTIVE_RUNS = 2;
@@ -206,7 +205,6 @@ function runContainer({ body, spec, payload, name, signal, timeoutMs }) {
       stdio: ['pipe', 'pipe', 'pipe'],
     });
     const stdoutChunks = [];
-    const stderrChunks = [];
     let stdoutBytes = 0;
     let ended = false;
     let timer;
@@ -257,11 +255,6 @@ function runContainer({ body, spec, payload, name, signal, timeoutMs }) {
       }
     }
 
-    function collectStderr(chunk) {
-      const capturedBytes = stderrChunks.reduce((total, captured) => total + captured.length, 0);
-      if (capturedBytes < STDERR_CAPTURE_THRESHOLD) stderrChunks.push(chunk);
-    }
-
     function handleClose(status) {
       if (!finishOnce()) return;
       if (status !== 0) {
@@ -287,7 +280,7 @@ function runContainer({ body, spec, payload, name, signal, timeoutMs }) {
     child.stdin.on('error', () => {});
     child.on('error', handleSpawnError);
     child.stdout.on('data', collectStdout);
-    child.stderr.on('data', collectStderr);
+    child.stderr.resume();
     child.on('close', handleClose);
     child.stdin.end(payload);
   });

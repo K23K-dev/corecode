@@ -1,22 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { Exercise } from '../src/lib/exercises';
-
-const browser = vi.hoisted(() => ({
-  run: vi.fn(),
-  cancel: vi.fn(),
-  dispose: vi.fn(),
-  created: vi.fn(),
-}));
-vi.mock('../src/lib/runner', () => ({
-  PythonRunner: class {
-    constructor() {
-      browser.created();
-    }
-    run = browser.run;
-    cancel = browser.cancel;
-    dispose = browser.dispose;
-  },
-}));
 import { PracticeRunner } from '../src/lib/practice-runner';
 
 const exercise = {
@@ -35,22 +18,36 @@ afterEach(() => {
 });
 
 describe('local and hosted execution routing', () => {
-  it('keeps the existing isolated browser runner for the local app', async () => {
-    vi.stubGlobal('location', { origin: 'http://127.0.0.1:5173' });
-    const fetcher = vi.fn();
-    vi.stubGlobal('fetch', fetcher);
-    browser.run.mockResolvedValueOnce(result);
-    const runner = new PracticeRunner();
-    expect(await runner.run(exercise, 'pass', 'submit', '', vi.fn())).toEqual(result);
-    expect(browser.created).toHaveBeenCalledOnce();
-    expect(browser.run).toHaveBeenCalledWith(
-      { code: 'pass', entryPoint: 'answer', cases: exercise.cases },
-      expect.any(Function),
-    );
-    expect(fetcher).not.toHaveBeenCalled();
-    runner.dispose();
-    expect(browser.dispose).toHaveBeenCalledOnce();
-  });
+  it.each(['browser-python', undefined] as const)(
+    'sends local runtime %s to the private API without browser-provided grading data',
+    async (runtime) => {
+      vi.stubGlobal('location', { origin: 'http://127.0.0.1:5173' });
+      const fetcher = vi.fn().mockResolvedValue(Response.json(result));
+      vi.stubGlobal('fetch', fetcher);
+      const onStage = vi.fn();
+      const runner = new PracticeRunner();
+      expect(await runner.run({ ...exercise, runtime }, 'pass', 'submit', '', onStage)).toEqual(
+        result,
+      );
+      expect(fetcher).toHaveBeenCalledOnce();
+      const [path, options] = fetcher.mock.calls[0];
+      expect(path).toBe('/api/run');
+      expect(options.method).toBe('POST');
+      expect(options.headers).toEqual({
+        'Content-Type': 'application/json',
+        'X-Code-Practice-Client': '1',
+      });
+      expect(JSON.parse(options.body)).toEqual({
+        problemId: exercise.id,
+        problemVersion: exercise.version,
+        code: 'pass',
+        mode: 'submit',
+      });
+      expect(onStage.mock.calls).toEqual([['running']]);
+      runner.dispose();
+      expect(options.signal.aborted).toBe(false);
+    },
+  );
 
   it.each(['browser-python', 'python', 'javascript', 'sql', 'shell'] as const)(
     'sends hosted %s to the API, never to the visitor’s localhost',
@@ -62,7 +59,6 @@ describe('local and hosted execution routing', () => {
       expect(await runner.run({ ...exercise, runtime }, 'code', 'submit', '', vi.fn())).toEqual(
         result,
       );
-      expect(browser.created).not.toHaveBeenCalled();
       const [path, options] = fetcher.mock.calls[0];
       expect(path).toBe('/api/run');
       expect(JSON.parse(options.body)).toEqual({
@@ -74,19 +70,28 @@ describe('local and hosted execution routing', () => {
     },
   );
 
-  it('keeps custom input ungraded and sends no browser-supplied spec', async () => {
-    vi.stubGlobal('location', { origin: 'https://corecode-omega.vercel.app' });
-    const fetcher = vi.fn().mockResolvedValue(Response.json(result));
-    vi.stubGlobal('fetch', fetcher);
-    await new PracticeRunner().run(exercise, 'code', 'custom', '(4,)', vi.fn());
-    expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({
-      problemId: exercise.id,
-      problemVersion: exercise.version,
-      code: 'code',
-      mode: 'custom',
-      customArgs: '(4,)',
-    });
-  });
+  it.each(['http://127.0.0.1:5173', 'https://corecode-omega.vercel.app'])(
+    'preserves the ungraded custom mode without browser-supplied specs from %s',
+    async (origin) => {
+      vi.stubGlobal('location', { origin });
+      const customResult = {
+        ...result,
+        cases: [{ name: 'Custom input', input: '(4,)', actual: '8', passed: null, expected: '' }],
+      };
+      const fetcher = vi.fn().mockResolvedValue(Response.json(customResult));
+      vi.stubGlobal('fetch', fetcher);
+      expect(await new PracticeRunner().run(exercise, 'code', 'custom', '(4,)', vi.fn())).toEqual(
+        customResult,
+      );
+      expect(JSON.parse(fetcher.mock.calls[0][1].body)).toEqual({
+        problemId: exercise.id,
+        problemVersion: exercise.version,
+        code: 'code',
+        mode: 'custom',
+        customArgs: '(4,)',
+      });
+    },
+  );
 
   it('shows a useful error when deployment protection requires sign-in', async () => {
     vi.stubGlobal(
@@ -105,7 +110,9 @@ describe('local and hosted execution routing', () => {
     );
   });
 
-  it('aborts only the active request when canceled', async () => {
+  it.each(['cancel', 'dispose'] as const)('aborts the active request on %s', async (action) => {
+    vi.useFakeTimers();
+    vi.stubGlobal('location', { origin: 'http://127.0.0.1:5173' });
     let observed: AbortSignal | undefined;
     vi.stubGlobal(
       'fetch',
@@ -118,9 +125,10 @@ describe('local and hosted execution routing', () => {
     );
     const runner = new PracticeRunner();
     const pending = runner.run(exercise, 'pass', 'submit', '', vi.fn());
-    runner.cancel();
+    runner[action]();
     expect(observed?.aborted).toBe(true);
     await expect(pending).rejects.toThrow('Canceled');
+    expect(vi.getTimerCount()).toBe(0);
   });
 
   it.each([
@@ -141,13 +149,7 @@ describe('local and hosted execution routing', () => {
         );
       }),
     );
-    const pending = new PracticeRunner().run(
-      { ...exercise, runtime: 'python' },
-      'pass',
-      'submit',
-      '',
-      vi.fn(),
-    );
+    const pending = new PracticeRunner().run(exercise, 'pass', 'submit', '', vi.fn());
     const rejected = expect(pending).rejects.toThrow('Timed out');
     await vi.advanceTimersByTimeAsync(timeoutMs - 1);
     expect(observed?.aborted).toBe(false);
@@ -155,6 +157,5 @@ describe('local and hosted execution routing', () => {
     expect(observed?.aborted).toBe(true);
     await rejected;
     expect(vi.getTimerCount()).toBe(0);
-    expect(browser.created).not.toHaveBeenCalled();
   });
 });

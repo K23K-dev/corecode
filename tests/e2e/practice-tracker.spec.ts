@@ -298,6 +298,31 @@ test('only missed days since practice began offer repair and no hearts means no 
     'No hearts available. Solve on five days in a streak to earn one.',
   );
   await expect(dialog.getByRole('button', { name: 'Use 1 heart', exact: true })).toBeDisabled();
+  for (const width of [1440, 390, 320]) {
+    await page.setViewportSize({ width, height: 844 });
+    const layout = await dialog.evaluate((element) => {
+      const heading = element.querySelector('.modal-header h2')!.getBoundingClientRect();
+      const paragraphs = [...element.querySelectorAll('.tracker-repair-dialog > p')].map(
+        (paragraph) => paragraph.getBoundingClientRect(),
+      );
+      const close = element.querySelector('.modal-header button')!.getBoundingClientRect();
+      const confirm = element.querySelector('.modal-actions .primary')!.getBoundingClientRect();
+      return {
+        leftOffsets: paragraphs.map((paragraph) => Math.abs(paragraph.left - heading.left)),
+        paragraphGaps: paragraphs
+          .slice(1)
+          .map((paragraph, index) => paragraph.top - paragraphs[index].bottom),
+        actionOffset: Math.abs(confirm.right - close.right),
+        inset: paragraphs[0].left - element.getBoundingClientRect().left,
+        fits: element.scrollWidth <= element.clientWidth,
+      };
+    });
+    expect(layout.leftOffsets.every((offset) => offset <= 1)).toBe(true);
+    expect(layout.paragraphGaps.every((gap) => gap >= 10)).toBe(true);
+    expect(layout.actionOffset).toBeLessThanOrEqual(1);
+    expect(layout.inset).toBeGreaterThanOrEqual(18);
+    expect(layout.fits).toBe(true);
+  }
   await dialog.getByRole('button', { name: 'Cancel', exact: true }).click();
   expect(posts).toBe(0);
 });

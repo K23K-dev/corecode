@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { Check, CircleAlert, CircleCheck, LoaderCircle, Terminal, X } from 'lucide-react';
-import type { RunResult, RunnerStage } from '../lib/runner';
+import type { RunResult, RunnerStage } from '../lib/practice-runner';
 
 export interface Execution {
   mode: 'example' | 'submit' | 'custom';

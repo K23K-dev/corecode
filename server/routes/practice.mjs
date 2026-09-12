@@ -1,7 +1,9 @@
 import { Router } from 'express';
+import { executeProblem } from '../../runner/execution.mjs';
 import {
   readActivity,
   readCatalog,
+  readExecutionProblem,
   readState,
   repairActivity,
   writeState,
@@ -9,7 +11,7 @@ import {
 import { methodNotAllowed } from '../middleware/errors.mjs';
 import { jsonBody } from '../middleware/json.mjs';
 
-export function practiceRoutes(pool) {
+export function practiceRoutes(pool, executeCode = executeProblem) {
   const router = Router({ caseSensitive: true, strict: true });
 
   // Explicit HEAD/all handlers preserve the existing allowed-method contract.
@@ -43,10 +45,29 @@ export function practiceRoutes(pool) {
 
   router
     .route('/api/activity/repairs')
-    .head(methodNotAllowed)
     .post(jsonBody, async (request, response) =>
       response.json(await repairActivity(pool, request.body)),
     )
+    .all(methodNotAllowed);
+
+  router
+    .route('/api/run')
+    .post(jsonBody, async (request, response) => {
+      const controller = new AbortController();
+      const cancel = () => {
+        if (!response.writableEnded) controller.abort();
+      };
+      response.once('close', cancel);
+      try {
+        if (response.destroyed) return;
+        const problem = await readExecutionProblem(pool, request.body?.problemId);
+        if (controller.signal.aborted || response.destroyed) return;
+        const result = await executeCode(request.body, problem, { signal: controller.signal });
+        if (!response.destroyed && !response.writableEnded) response.json(result);
+      } finally {
+        response.off('close', cancel);
+      }
+    })
     .all(methodNotAllowed);
 
   return router;

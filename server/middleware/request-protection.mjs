@@ -74,55 +74,47 @@ function protectBrowserRequest(request, appOrigin, hosted = false) {
   if (!request.url?.startsWith('/') || request.url.startsWith('//')) {
     throw new RequestError('Invalid request path.');
   }
-  request.practiceUrl = new URL(request.url, appOrigin);
+  const url = new URL(request.url, appOrigin);
   // Express must route the same normalized path as the original HTTP handler.
-  request.url = request.practiceUrl.pathname + request.practiceUrl.search;
+  request.url = url.pathname + url.search;
 }
 
 /** CSRF/host checks only. Vercel Authentication must protect all deployments upstream. */
 export function protectHostedRequest(appOrigin) {
   const browser = checkedHostedOrigin(appOrigin);
   return (request, _response, next) => {
-    try {
-      // Never derive trusted origins from Host, forwarded headers, or client auth headers.
-      if (request.headers.host !== browser.host) {
-        throw new RequestError('Use the configured production application.', 403, 'forbidden');
-      }
-      protectBrowserRequest(request, appOrigin, true);
-      next();
-    } catch (error) {
-      next(error);
+    // Never derive trusted origins from Host, forwarded headers, or client auth headers.
+    if (request.headers.host !== browser.host) {
+      throw new RequestError('Use the configured production application.', 403, 'forbidden');
     }
+    protectBrowserRequest(request, appOrigin, true);
+    next();
   };
 }
 
 export function protectRequest(appOrigin) {
   const browser = checkedOrigin(appOrigin);
-  return (request, response, next) => {
-    try {
-      const port = request.socket.localPort;
-      const authorities = new Set([
-        browser.host,
-        `127.0.0.1:${port}`,
-        `localhost:${port}`,
-        `[::1]:${port}`,
-      ]);
-      if (
-        !LOOPBACK_PEERS.has(request.socket.remoteAddress) ||
-        typeof request.headers.host !== 'string' ||
-        !authorities.has(request.headers.host)
-      ) {
-        throw new RequestError(
-          'This endpoint is available only through the local application.',
-          403,
-          'forbidden',
-        );
-      }
-
-      protectBrowserRequest(request, appOrigin);
-      next();
-    } catch (error) {
-      next(error);
+  return (request, _response, next) => {
+    const port = request.socket.localPort;
+    const authorities = new Set([
+      browser.host,
+      `127.0.0.1:${port}`,
+      `localhost:${port}`,
+      `[::1]:${port}`,
+    ]);
+    if (
+      !LOOPBACK_PEERS.has(request.socket.remoteAddress) ||
+      typeof request.headers.host !== 'string' ||
+      !authorities.has(request.headers.host)
+    ) {
+      throw new RequestError(
+        'This endpoint is available only through the local application.',
+        403,
+        'forbidden',
+      );
     }
+
+    protectBrowserRequest(request, appOrigin);
+    next();
   };
 }

@@ -26,12 +26,7 @@ export function readVercelConfiguration(environment = process.env) {
 }
 
 /** Reuse one pool/app per warm function. Never initialize or seed the database here. */
-export function createVercelHandler({
-  environment = process.env,
-  createPool = makePool,
-  attachPool = attachDatabasePool,
-  executeCode,
-} = {}) {
+export function createVercelHandler({ environment = process.env, executeCode } = {}) {
   let app;
   // Export an actual Express app. Vercel then leaves the request body and response
   // helpers alone, preserving our strict JSON parser and uncached error contract.
@@ -42,8 +37,8 @@ export function createVercelHandler({
     if (!app) {
       try {
         const { appOrigin, connectionString } = readVercelConfiguration(environment);
-        const pool = createPool(connectionString);
-        attachPool(pool);
+        const pool = makePool(connectionString);
+        attachDatabasePool(pool);
         app = createApp({ pool, appOrigin, hosted: true, executeCode });
       } catch {
         // Avoid Vercel's HTML exception page and never disclose secrets/errors.

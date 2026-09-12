@@ -1,42 +1,34 @@
 # Code Practice
 
-A personal coding-practice website with an editor, tests, and saved progress.
-Problems, grading cases, and progress live in Neon; startup does not seed content.
+A personal coding-practice website. Problems, grading cases, and progress live in Neon.
 
 ## Run locally
 
-Requires Node.js 22.12+, Docker Desktop running, and the existing Neon connection
-in private `.env` as `POSTGRES_URL` with `sslmode=require`. See [.env.example](.env.example).
+Requires Node.js 22.12+, Docker Desktop running, and a private `.env` containing
+`POSTGRES_URL` with `sslmode=require`. Use [.env.example](.env.example) as the template.
 
 ```sh
 npm install
 npm run runner:setup
-npm run build
-npm start
+npm run dev
 ```
 
-Open [localhost:5173](http://127.0.0.1:5173). After setup, start with `npm start`.
-For development, use `npm run dev`.
+Open [localhost:5173](http://127.0.0.1:5173). For a built version, run
+`npm run build` followed by `npm start`.
 
 ## Vercel
 
-The included configuration deploys Vite and the Express API together. Keep this
-personal app behind **Vercel Authentication → All Deployments**; it has one shared
-progress profile, not public user accounts.
+Keep **Vercel Authentication → All Deployments** enabled: this app shares one
+personal profile. Set these variables in Production only:
 
-Production variables: `POSTGRES_URL`, `VERCEL_AUTHENTICATION_CONFIRMED=1`, and
-`RUNNER_SANDBOX_SNAPSHOT` after runner preparation and verification. Preview builds
-cannot use the personal data API. No schema migration runs during deployment.
+- `POSTGRES_URL`: the existing Neon connection.
+- `APP_ORIGIN=https://corecode-alpha.vercel.app`: update and redeploy if the domain changes.
+- `VERCEL_AUTHENTICATION_CONFIRMED=1`: only after enabling protection.
+- `RUNNER_SANDBOX_SNAPSHOT`: a prepared and verified runner snapshot.
 
-Hosted execution uses Vercel Sandbox; Docker Desktop is only for local execution.
-After Vercel CLI login/link and pulling development credentials to a separate,
-ignored `.env.vercel.local`, prepare the clean runner snapshot with:
+Hosted execution uses Vercel Sandbox, not your Docker Desktop. Snapshot preparation
+uses cloud quota. Preview deployments cannot use the personal data API.
 
-```sh
-node --env-file=.env.vercel.local runner/setup.mjs --sandbox --confirm-cloud-usage
-```
-
-This consumes Sandbox quota. Verify the graders before enabling the snapshot in
-production. See [Deployment setup](docs/deployment.md) for the remaining checks.
-
-Details: [Database](docs/database.md) · [Code runners](docs/runner.md) · [Problem authoring](docs/manual-authoring.md).
+Apply approved Neon schema updates with `initializeDatabase` in
+`server/repository.mjs` before deploying code that needs them. Vercel deployment
+does not run migrations or seed content. Never commit credentials.

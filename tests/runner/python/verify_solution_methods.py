@@ -1,10 +1,8 @@
 """Trusted regression checks. Execute only in the restricted practice container."""
-import json
 import textwrap
 import unittest
 from unittest.mock import patch
 
-import browser_grader
 import entrypoint
 
 
@@ -21,92 +19,6 @@ def native_job(spec, source, mode='submit', **options):
         'protocolVersion': 2, 'problemId': 'solution-method-regression',
         'problemVersion': 'a' * 64, 'spec': spec, 'code': code(source), 'mode': mode, **options,
     }
-
-
-class BrowserMethods(unittest.TestCase):
-    def run_code(self, source, cases=None, **options):
-        return json.loads(browser_grader.grade_request_json(json.dumps({
-            'code': code(source), 'entryPoint': 'answer', 'cases': cases or [case()], **options,
-        })))
-
-    def assert_passed(self, result):
-        self.assertNotIn('error', result, result)
-        self.assertTrue(result['cases'], result)
-        self.assertTrue(all(row.get('passed') for row in result['cases']), result)
-
-    def test_legacy_standalone_function(self):
-        self.assert_passed(self.run_code('def answer(value): return value * 2'))
-
-    def test_solution_method_helpers_and_recursion(self):
-        self.assert_passed(self.run_code('''
-            def double(value): return value * 2
-            class Solution:
-                def answer(self, value):
-                    return self.answer(value - 1) + double(1) if value else 0
-        '''))
-
-    def test_solution_method_wins_over_standalone(self):
-        self.assert_passed(self.run_code('''
-            def answer(value): return -1
-            class Solution:
-                def answer(self, value): return value * 2
-        '''))
-
-    def test_unrelated_solution_does_not_break_legacy_function(self):
-        self.assert_passed(self.run_code('''
-            def answer(value): return value * 2
-            class Solution:
-                def __init__(self, required): raise RuntimeError('must not instantiate')
-                def other(self): return None
-        '''))
-
-    def test_fresh_instance_for_each_case(self):
-        self.assert_passed(self.run_code('''
-            class Solution:
-                def __init__(self): self.calls = 0
-                def answer(self):
-                    self.calls += 1
-                    return self.calls
-        ''', [case('()', '1'), case('()', '1')]))
-
-    def test_custom_input_stays_ungraded(self):
-        result = self.run_code('class Solution:\n    def answer(self, value): return value * 2', customArgs='(3,)')
-        self.assertEqual(result['cases'][0]['actual'], '6')
-        self.assertNotIn('passed', result['cases'][0])
-        self.assertNotIn('expected', result['cases'][0])
-
-    def test_custom_input_rejects_expressions(self):
-        result = self.run_code('class Solution:\n    def answer(self, value): return value', customArgs='(1 + 2,)')
-        self.assertIn('ValueError', result['cases'][0]['error'])
-
-    def test_missing_method_names_both_supported_forms(self):
-        for source in ['class Solution: pass', 'answer = 1']:
-            result = self.run_code(source)
-            self.assertIn('Solution.answer', result['error'])
-            self.assertIn('standalone function named answer', result['error'])
-
-    def test_constructor_and_method_errors_remain_feedback(self):
-        for source, message in [
-            ('class Solution:\n    def __init__(self): raise ValueError("init failed")\n    def answer(self, value): return 6', 'init failed'),
-            ('class Solution:\n    def answer(self, value): raise SystemExit("stopped")', 'SystemExit: stopped'),
-        ]:
-            result = self.run_code(source)
-            self.assertIn(message, result['cases'][0]['error'])
-            self.assertFalse(result['cases'][0]['passed'])
-
-    def test_behavioral_checks_are_unchanged(self):
-        result = self.run_code('class Solution:\n    def answer(self, values):\n        values.reverse()\n        return values',
-                               [case('([1, 2],)', '[2, 1]', check='unchanged')])
-        self.assertIn('changed its input', result['cases'][0]['error'])
-        result = self.run_code('class Solution:\n    def answer(self): return [[0]] * 2',
-                               [case('()', '[[0], [0]]', check='independent_rows')])
-        self.assertIn('separate list', result['cases'][0]['error'])
-        result = self.run_code('class Solution:\n    def answer(self): return True', [case('()', '1')])
-        self.assertFalse(result['cases'][0]['passed'])
-
-    def test_request_namespaces_remain_separate(self):
-        self.assert_passed(self.run_code('marker = 9\nclass Solution:\n    def answer(self, value): return value * 2'))
-        self.assert_passed(self.run_code('class Solution:\n    def answer(self): return "marker" in globals()', [case('()', 'False')]))
 
 
 class NativeMethods(unittest.TestCase):
@@ -202,12 +114,15 @@ assert solution.answer(3) == 6
         self.assertEqual(result['cases'][0]['expected'], '')
         with self.assertRaisesRegex(ValueError, 'tuple'):
             self.run_code(source, mode='custom', customArgs='3')
+        with self.assertRaises(ValueError):
+            self.run_code(source, mode='custom', customArgs='(1 + 2,)')
 
     def test_missing_method_errors_for_literals_scenarios_and_custom(self):
         source = 'class Solution: pass'
         for cases in [[case()], [{'name': 'Missing function', 'expected': '6', 'code': 'solution.answer(3)'}]]:
             result = self.run_code(source, cases)
             self.assertIn('Solution.answer', result['cases'][0]['error'])
+            self.assertIn('standalone function named answer', result['cases'][0]['error'])
         with self.assertRaisesRegex(ValueError, 'Solution.answer'):
             self.run_code(source, mode='custom', customArgs='(3,)')
 
@@ -228,6 +143,53 @@ assert solution.answer(3) == 6
         result = self.run_code('class Solution:\n    def answer(self): return [[0]] * 2',
                                [case('()', '[[0], [0]]', independentRows=True)])
         self.assertIn('same list', result['cases'][0]['error'])
+
+    def test_nonmutating_inputs_and_distinct_rows_are_accepted(self):
+        self.assert_passed(self.run_code(
+            'def answer(values): return list(reversed(values))',
+            [case('([1, 2],)', '[2, 1]', unchangedArgs=True)],
+        ))
+        for rows in ['[[0], [0]]', '[[], []]', '[]', '[[987654321], [987654321]]']:
+            with self.subTest(rows=rows):
+                self.assert_passed(self.run_code(
+                    'def answer(): return ' + rows,
+                    [case('()', rows, independentRows=True)],
+                ))
+
+    def test_independent_rows_rejects_aliases_including_empty_and_later_rows(self):
+        for expression, expected in [
+            ('[[0]] * 2', '[[0], [0]]'),
+            ('[[]] * 2', '[[], []]'),
+            ('(lambda row: [[0], row, row])([0])', '[[0], [0], [0]]'),
+        ]:
+            with self.subTest(expression=expression):
+                result = self.run_code(
+                    'class Solution:\n    def answer(self): return ' + expression,
+                    [case('()', expected, independentRows=True)],
+                )
+                self.assertFalse(result['cases'][0]['passed'], result)
+                self.assertIn('same list', result['cases'][0]['error'])
+
+    def test_literal_results_keep_exact_scalar_and_sequence_types(self):
+        for actual, expected in [('True', '1'), ('[True]', '[1]'), ('(1, 2)', '[1, 2]')]:
+            with self.subTest(actual=actual, expected=expected):
+                result = self.run_code('def answer(): return ' + actual, [case('()', expected)])
+                self.assertFalse(result['cases'][0]['passed'], result)
+
+    def test_private_scenario_takes_precedence_and_checks_empty_row_identity(self):
+        scenario = case('(99,)', 'Two distinct empty rows', code='''
+actual = solution.answer()
+assert exact(actual, [[], []]), 'Return two empty rows'
+assert len({id(row) for row in actual}) == len(actual), 'Rows share the same list'
+''')
+        for expression, passed in [('[[], []]', True), ('[[]] * 2', False)]:
+            with self.subTest(expression=expression):
+                result = self.run_code('def answer(): return ' + expression, [scenario])
+                self.assertEqual(result['cases'][0]['passed'], passed, result)
+                if passed:
+                    self.assertEqual(result['cases'][0]['actual'], '[[], []]')
+                else:
+                    self.assertIn('same list', result['cases'][0]['error'])
 
 
 class ScientificHelpers(unittest.TestCase):

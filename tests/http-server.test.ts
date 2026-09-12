@@ -233,8 +233,23 @@ describe('HTTP routes and response contract without a database', () => {
     const reply = await request('GET', '/api/activity?timeZone=America%2FNew_York&timeZone=UTC');
     expect(reply.body).toEqual(ACTIVITY);
     expect(mocks.readActivity).toHaveBeenLastCalledWith(pool);
-    await request('GET', '/api/activity?timeZone=');
-    expect(mocks.readActivity).toHaveBeenLastCalledWith(pool);
+    for (const timeZone of [
+      '',
+      'Not/A_TimeZone',
+      'a'.repeat(101),
+      '+03:00',
+      'UTC\0',
+      ' America/New_York',
+      'Pacific/Kiritimati',
+    ]) {
+      const response = await request(
+        'GET',
+        `/api/activity?timeZone=${encodeURIComponent(timeZone)}`,
+      );
+      expect(response.status, timeZone).toBe(200);
+      expect(response.body).toEqual(ACTIVITY);
+      expect(mocks.readActivity).toHaveBeenLastCalledWith(pool);
+    }
   });
 
   it('passes repair requests to their atomic repository operation and returns current activity', async () => {
@@ -422,6 +437,10 @@ describe('HTTP routes and response contract without a database', () => {
       ['PUT', '/api/health', 405],
       ['PATCH', '/api/state', 405],
       ['GET', '/api/run', 405],
+      ['POST', '/api/activity', 405],
+      ['PUT', '/api/activity', 405],
+      ['PATCH', '/api/activity', 405],
+      ['DELETE', '/api/activity', 405],
       ['POST', '/api/missing', 404],
     ] as const) {
       const reply = await request(method, pathname, '{broken');
@@ -448,11 +467,14 @@ describe('loopback and browser request boundaries', () => {
       Forwarded: 'for=127.0.0.1;host=127.0.0.1:5173;proto=http',
     },
   ])('rejects invalid browser authority despite forwarding headers: %#', async (headers) => {
-    const reply = await request('GET', '/api/state', undefined, { headers });
-    expect(reply.status).toBe(403);
-    expect(reply.body).toMatchObject({ code: 'forbidden' });
+    for (const pathname of ['/api/state', '/api/activity']) {
+      const reply = await request('GET', pathname, undefined, { headers });
+      expect(reply.status).toBe(403);
+      expect(reply.body).toMatchObject({ code: 'forbidden' });
+      expectPrivateJson(reply);
+    }
     expect(mocks.readState).not.toHaveBeenCalled();
-    expectPrivateJson(reply);
+    expect(mocks.readActivity).not.toHaveBeenCalled();
   });
 
   it('accepts only the configured frontend or actual listener loopback authorities', async () => {
@@ -472,12 +494,17 @@ describe('loopback and browser request boundaries', () => {
     { 'X-Code-Practice-Client': 'true' },
     { Origin: 'http://localhost:5173' },
   ])('checks write origin and marker before routes or bodies: %#', async (headers) => {
-    for (const pathname of ['/api/state', '/api/missing']) {
-      const reply = await request('PUT', pathname, '{broken', { headers });
+    for (const [method, pathname] of [
+      ['PUT', '/api/state'],
+      ['PUT', '/api/missing'],
+      ['POST', '/api/run'],
+    ]) {
+      const reply = await request(method, pathname, '{broken', { headers });
       expect(reply.status).toBe(403);
       expect(reply.body).toMatchObject({ code: 'forbidden' });
     }
     expect(mocks.writeState).not.toHaveBeenCalled();
+    expect(mocks.executeProblem).not.toHaveBeenCalled();
   });
 
   it.each([
@@ -487,12 +514,18 @@ describe('loopback and browser request boundaries', () => {
     'application/json; charset="utf-8"',
     'application/json; extra=1',
   ])('rejects unsupported media types before parsing: %s', async (contentType) => {
-    const reply = await request('PUT', '/api/state', '{broken', {
-      headers: { 'Content-Type': contentType },
-    });
-    expect(reply.status).toBe(415);
-    expect(reply.body).toMatchObject({ code: 'unsupported_media_type' });
+    for (const [method, pathname] of [
+      ['PUT', '/api/state'],
+      ['POST', '/api/run'],
+    ]) {
+      const reply = await request(method, pathname, '{broken', {
+        headers: { 'Content-Type': contentType },
+      });
+      expect(reply.status).toBe(415);
+      expect(reply.body).toMatchObject({ code: 'unsupported_media_type' });
+    }
     expect(mocks.writeState).not.toHaveBeenCalled();
+    expect(mocks.executeProblem).not.toHaveBeenCalled();
   });
 
   it('accepts case-insensitive JSON and UTF-8 media-type spelling', async () => {
@@ -546,9 +579,10 @@ describe('bounded JSON parsing and error responses', () => {
     },
   );
 
-  it('retains downstream unsafe-property validation', async () => {
-    const body =
-      '{"expectedRevision":4,"progress":{"version":1,"exercises":{"__proto__":{}}},"stars":[]}';
+  it.each([
+    '{"expectedRevision":4,"progress":{"version":1,"exercises":{"__proto__":{}}},"stars":[]}',
+    JSON.stringify({ ...UPDATE, expectedRevision: -1 }),
+  ])('retains downstream unsafe-property and state validation: %#', async (body) => {
     const reply = await request('PUT', '/api/state', body);
     expect(reply.status).toBe(400);
     expect(reply.body).toMatchObject({ code: 'invalid_request' });
@@ -566,17 +600,24 @@ describe('bounded JSON parsing and error responses', () => {
     'rejects over-limit %s bodies before storage or execution',
     async (framing) => {
       const body = Buffer.alloc(MAX_BODY_BYTES + 1, 32);
-      const reply = await request(
-        'POST',
-        '/api/run',
-        framing === 'length' ? body : undefined,
-        framing === 'chunked'
-          ? { chunks: [body.subarray(0, MAX_BODY_BYTES), body.subarray(MAX_BODY_BYTES)] }
-          : {},
-      );
-      expect(reply.status).toBe(413);
-      expect(reply.body).toMatchObject({ code: 'payload_too_large' });
-      expectPrivateJson(reply);
+      for (const [method, pathname] of [
+        ['PUT', '/api/state'],
+        ['POST', '/api/run'],
+      ]) {
+        // Declared sizes are rejected before reading; chunked requests must send the oversized body.
+        const reply = await request(
+          method,
+          pathname,
+          undefined,
+          framing === 'chunked'
+            ? { chunks: [body.subarray(0, MAX_BODY_BYTES), body.subarray(MAX_BODY_BYTES)] }
+            : { headers: { 'Content-Length': String(body.length) } },
+        );
+        expect(reply.status).toBe(413);
+        expect(reply.body).toMatchObject({ code: 'payload_too_large' });
+        expectPrivateJson(reply);
+      }
+      expect(mocks.writeState).not.toHaveBeenCalled();
       expect(mocks.readCatalog).not.toHaveBeenCalled();
       expect(mocks.readExecutionProblem).not.toHaveBeenCalled();
       expect(mocks.executeProblem).not.toHaveBeenCalled();

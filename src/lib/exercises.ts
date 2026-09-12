@@ -1,4 +1,4 @@
-import type { TestCase } from './runner';
+import type { TestCase } from './practice-runner';
 
 export interface Exercise {
   version?: string;

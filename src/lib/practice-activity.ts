@@ -113,47 +113,6 @@ function activityCounts(days: ActivityDay[]): Map<number, number> {
   return counts;
 }
 
-/** The calendar date at an instant in the browser's reported IANA time zone. */
-export function localDateKey(date: Date, timeZone: string): string {
-  if (!Number.isFinite(date.getTime())) throw new RangeError('Expected a valid Date.');
-  const parts = new Intl.DateTimeFormat('en-US', {
-    timeZone,
-    calendar: 'gregory',
-    numberingSystem: 'latn',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    era: 'short',
-  }).formatToParts(date);
-  const value = (type: Intl.DateTimeFormatPartTypes) =>
-    parts.find((part) => part.type === type)?.value ?? '';
-  const key = `${value('year').padStart(4, '0')}-${value('month')}-${value('day')}`;
-  if (value('era') !== 'AD' || dateOrdinal(key) === null)
-    throw new RangeError('Calendar dates must fall between years 0001 and 9999.');
-  return key;
-}
-
-/** Today can still be completed, so a streak ending yesterday remains current. */
-export function summarizeStreak(
-  days: ActivityDay[],
-  today: string,
-): { current: number; best: number } {
-  const todayOrdinal = requireDateOrdinal(today);
-  const active = [...activityCounts(days).keys()]
-    .filter((day) => day <= todayOrdinal)
-    .sort((a, b) => a - b);
-  let best = 0;
-  let run = 0;
-  let previous: number | undefined;
-  for (const day of active) {
-    run = previous !== undefined && day === previous + 1 ? run + 1 : 1;
-    best = Math.max(best, run);
-    previous = day;
-  }
-  const current = previous === todayOrdinal || previous === todayOrdinal - 1 ? run : 0;
-  return { current, best };
-}
-
 function monthStart(month: string): number {
   if (typeof month !== 'string' || !/^\d{4}-\d{2}$/.test(month))
     throw new RangeError('Expected a month in YYYY-MM format.');

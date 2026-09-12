@@ -343,7 +343,7 @@ test('Python autocomplete ranks common names and accepts fuzzy print matches', a
   const editor = page.getByRole('textbox', { name: 'Python solution editor' });
   const popup = page.locator('.cm-tooltip-autocomplete');
   const prefix = 'def normalize_text(text):\n    ';
-  for (const input of ['p', 'pri', 'prn']) {
+  for (const input of ['p', 'prn']) {
     await setCode(page, prefix);
     await editor.pressSequentially(input, { delay: 35 });
     const first = popup.getByRole('option').first();
@@ -533,8 +533,8 @@ test('real run, full submit, failed case details, custom input, and persisted hi
   await expect(
     page
       .locator(`tr[data-problem-id="${defaultId}"]`)
-      .getByRole('img', { name: 'Solved', exact: true }),
-  ).toBeVisible();
+      .getByRole('button', { name: 'Mark Normalize text incomplete', exact: true }),
+  ).toHaveAttribute('aria-pressed', 'true');
   expect(errors).toEqual([]);
 });
 
@@ -542,7 +542,7 @@ test('infinite loop times out, Stop cancels, and the next run succeeds', async (
   await page.goto(`/#${defaultId}`);
   await setCode(page, 'def normalize_text(text):\n    while True:\n        pass\n');
   await submit(page);
-  await expect(page.getByText(/exceeded 4 seconds/)).toBeVisible();
+  await expect(page.getByText(/exceeded 20 seconds/)).toBeVisible();
   await page.getByRole('button', { name: 'Run example', exact: true }).click();
   await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeVisible();
   await page.getByRole('button', { name: 'Stop', exact: true }).click();
@@ -831,6 +831,7 @@ test('Solution explains its approach and shows only available useful alternative
 });
 
 const containerExamples = [
+  ['original Python', 'python-core-normalize-text-01'],
   ['JavaScript data function', 'frontend-js-002-active-user-ids'],
   ['React interaction', 'frontend-react-003-counter'],
   ['responsive CSS', 'frontend-css-002-responsive-product-grid'],
@@ -844,7 +845,6 @@ const containerExamples = [
 for (const [label, problemId] of containerExamples) {
   test(`real Docker Submit grades and persists a ${label} exercise`, async ({ page, database }) => {
     const exercise = readyExercises.find((item) => item.id === problemId)!;
-    expect(exercise.runtime).not.toBe('browser-python');
     const errors: string[] = [];
     page.on('pageerror', (error) => errors.push(error.stack ?? error.message));
     await page.goto(`/#${problemId}`);

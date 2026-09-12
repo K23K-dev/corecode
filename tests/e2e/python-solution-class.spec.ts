@@ -4,7 +4,7 @@ import type { ProgressData } from '../../src/lib/progress';
 
 const scenarios = [
   {
-    label: 'browser Python',
+    label: 'original Python',
     id: 'python-core-normalize-text-01',
     runtime: 'browser-python',
     method: 'normalize_text',
@@ -95,7 +95,7 @@ for (const scenario of scenarios) {
     await page.getByRole('tab', { name: 'Question', exact: true }).click();
 
     // These are learner-written instance methods, not catalog reference copies.
-    // The browser variant also exercises recursive self calls in a helper.
+    // The original Python exercise also checks recursive self calls in a helper.
     await setCode(page, scenario.code);
     await page.getByRole('button', { name: 'Run example', exact: true }).click();
     await expect(page.getByText('Example passed', { exact: true })).toBeVisible({

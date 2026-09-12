@@ -2,7 +2,6 @@ import express from 'express';
 import { protectHostedRequest, protectRequest } from './middleware/request-protection.mjs';
 import { errorHandler, notFound } from './middleware/errors.mjs';
 import { practiceRoutes } from './routes/practice.mjs';
-import { executionRoutes } from './routes/execution.mjs';
 
 /** HTTP composition only: database ownership and listening belong to index.mjs. */
 export function createApp({
@@ -27,8 +26,7 @@ export function createApp({
     next();
   });
   app.use(hosted ? protectHostedRequest(appOrigin) : protectRequest(appOrigin));
-  app.use(practiceRoutes(pool));
-  app.use(executionRoutes(pool, executeCode));
+  app.use(practiceRoutes(pool, executeCode));
   app.use(notFound);
   app.use(errorHandler);
   return app;
