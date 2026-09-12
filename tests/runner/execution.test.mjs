@@ -219,14 +219,8 @@ describe('isolated execution boundary', { concurrency: false }, () => {
     for (const code of [undefined, null, [], 'a'.repeat(32_769), '界'.repeat(17_067)]) {
       await assert.rejects(executeProblem(request({ code }), problem), errorWith(400));
     }
-    for (const mode of [undefined, 'arbitrary-command', 'all', 1]) {
+    for (const mode of [undefined, 'custom', 'arbitrary-command', 'all', 1]) {
       await assert.rejects(executeProblem(request({ mode }), problem), errorWith(400));
-    }
-    for (const customArgs of [undefined, null, {}, 'x'.repeat(8_193)]) {
-      await assert.rejects(
-        executeProblem(request({ mode: 'custom', customArgs }), problem),
-        errorWith(400),
-      );
     }
     const controller = new AbortController();
     controller.abort();
@@ -241,8 +235,7 @@ describe('isolated execution boundary', { concurrency: false }, () => {
     const code = 'print("literal ; & $(whoami) 🐍")\n';
     const body = request({
       code,
-      mode: 'custom',
-      customArgs: '([1, 3], 3)',
+      mode: 'example',
       runtime: 'javascript',
       image: 'evil-image',
       mounts: ['C:/:/host'],
@@ -270,20 +263,15 @@ describe('isolated execution boundary', { concurrency: false }, () => {
       problemVersion: VERSION,
       spec: gradingSpec,
       code,
-      mode: 'custom',
-      customArgs: '([1, 3], 3)',
+      mode: 'example',
     });
     complete(call);
     assert.deepEqual(await pending, result());
   });
 
-  it('uses the private suite length for submissions and ignores custom input outside custom mode', async () => {
-    const pending = executeProblem(
-      request({ mode: 'submit', customArgs: 'not forwarded', cases: [] }),
-      problem,
-    );
+  it('uses the private suite length for submissions', async () => {
+    const pending = executeProblem(request({ mode: 'submit', cases: [] }), problem);
     const call = calls[0];
-    assert.ok(!Object.hasOwn(JSON.parse(Buffer.concat(call.input).toString('utf8')), 'customArgs'));
     complete(call, result(3));
     assert.equal((await pending).cases.length, 3);
   });
@@ -375,11 +363,10 @@ describe('isolated execution boundary', { concurrency: false }, () => {
     assert.deepEqual(await next, result());
   });
 
-  it('accepts inputs at the exact character, byte, and custom-input limits', async () => {
+  it('accepts code at the exact character and byte limits', async () => {
     const boundedRequests = [
       request({ code: 'a'.repeat(32_768) }),
       request({ code: '界'.repeat(17_066) + 'aa' }),
-      request({ mode: 'custom', customArgs: 'x'.repeat(8_192) }),
     ];
     for (const body of boundedRequests) {
       const pending = executeProblem(body, problem);

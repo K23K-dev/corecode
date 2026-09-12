@@ -14,17 +14,17 @@ def case(args='(3,)', expected='6', **checks):
     return {'name': 'Behavior', 'args': args, 'expected': expected, 'entryPoint': 'answer', **checks}
 
 
-def native_job(spec, source, mode='submit', **options):
+def native_job(spec, source, mode='submit'):
     return {
         'protocolVersion': 2, 'problemId': 'solution-method-regression',
-        'problemVersion': 'a' * 64, 'spec': spec, 'code': code(source), 'mode': mode, **options,
+        'problemVersion': 'a' * 64, 'spec': spec, 'code': code(source), 'mode': mode,
     }
 
 
 class NativeMethods(unittest.TestCase):
-    def run_code(self, source, cases=None, mode='submit', **options):
+    def run_code(self, source, cases=None, mode='submit'):
         spec = {'runtime': 'python', 'entryPoint': 'answer', 'cases': cases or [case()]}
-        return entrypoint.run(native_job(spec, source, mode, **options))
+        return entrypoint.run(native_job(spec, source, mode))
 
     def assert_passed(self, result):
         self.assertTrue(result['cases'], result)
@@ -103,28 +103,18 @@ assert solution.answer(3) == 6
                     return calls, self.calls
         ''', [case('()', '(1, 1)'), case('()', '(1, 1)')]))
 
-    def test_example_and_custom_modes(self):
+    def test_example_mode_runs_only_the_first_case(self):
         source = 'class Solution:\n    def answer(self, value): return value * 2'
         result = self.run_code(source, [case(), case('(4,)', '8')], mode='example')
         self.assertEqual(len(result['cases']), 1)
         self.assert_passed(result)
-        result = self.run_code(source, mode='custom', customArgs='(3,)')
-        self.assertEqual(result['cases'][0]['actual'], '6')
-        self.assertIsNone(result['cases'][0]['passed'])
-        self.assertEqual(result['cases'][0]['expected'], '')
-        with self.assertRaisesRegex(ValueError, 'tuple'):
-            self.run_code(source, mode='custom', customArgs='3')
-        with self.assertRaises(ValueError):
-            self.run_code(source, mode='custom', customArgs='(1 + 2,)')
 
-    def test_missing_method_errors_for_literals_scenarios_and_custom(self):
+    def test_missing_method_errors_for_literals_and_scenarios(self):
         source = 'class Solution: pass'
         for cases in [[case()], [{'name': 'Missing function', 'expected': '6', 'code': 'solution.answer(3)'}]]:
             result = self.run_code(source, cases)
             self.assertIn('Solution.answer', result['cases'][0]['error'])
             self.assertIn('standalone function named answer', result['cases'][0]['error'])
-        with self.assertRaisesRegex(ValueError, 'Solution.answer'):
-            self.run_code(source, mode='custom', customArgs='(3,)')
 
     def test_constructor_and_method_errors_remain_feedback(self):
         for source, message in [
@@ -332,6 +322,7 @@ class NativeProtocol(unittest.TestCase):
             {**valid, 'spec': {'runtime': 'shell', 'cases': [case()]}},
             {**valid, 'code': None},
             {**valid, 'code': 'x' * (50 * 1024 + 1)},
+            {**valid, 'mode': 'custom'},
             {**valid, 'mode': 'unrecognized'},
         ])
         with patch.object(entrypoint, 'solution_module') as candidate:

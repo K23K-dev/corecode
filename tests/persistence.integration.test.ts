@@ -440,9 +440,7 @@ describe.skipIf(process.env.CODE_PRACTICE_RUN_DB_TESTS !== '1')(
       expect((await run({ ...body, code: 'a'.repeat(32_769) })).status).toBe(400);
       expect((await run({ ...body, code: '界'.repeat(17_067) })).status).toBe(400);
       expect((await run({ ...body, mode: 'arbitrary-command' })).status).toBe(400);
-      expect((await run({ ...body, mode: 'custom', customArgs: 'x'.repeat(8_193) })).status).toBe(
-        400,
-      );
+      expect((await run({ ...body, mode: 'custom' })).status).toBe(400);
       expect((await readState()).body).toEqual({
         revision: 0,
         progress: EMPTY,

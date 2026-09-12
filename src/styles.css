@@ -282,7 +282,7 @@ h1 {
 .action-bar > div {
   display: flex;
 }
-/* Execution results, custom inputs, and submission history. */
+/* Execution results and submission history. */
 .result-panel {
   display: flex;
   flex-direction: column;
@@ -292,25 +292,17 @@ h1 {
   border-top: 1px solid var(--border);
   background: #191f28;
 }
-.result-tabs {
+.result-header {
   display: flex;
   border-bottom: 1px solid #303946;
 }
-.result-tabs > button {
+.result-header h2 {
+  margin: 0;
   padding: 0;
   display: flex;
   align-items: center;
-  gap: 6px;
-  border-bottom: 2px solid transparent;
-  border-radius: 0;
-}
-.result-tabs > button:hover {
-  color: var(--text);
-}
-.result-tabs small {
-  padding: 0 5px;
-  border-radius: 4px;
-  font-size: 9px;
+  border-bottom: 2px solid #aaa;
+  font-weight: 400;
 }
 .result-body {
   flex: 1;
@@ -432,43 +424,6 @@ h1 {
   color: var(--muted);
   line-height: 1.7;
   margin-top: 15px;
-}
-.custom-input label {
-  font-weight: 550;
-}
-.custom-input p {
-  line-height: 1.65;
-  margin-top: 7px;
-}
-.custom-input textarea {
-  display: block;
-  width: 100%;
-  min-height: 65px;
-  height: 72px;
-  resize: vertical;
-  border: 1px solid #455570;
-  border-radius: 5px;
-  padding: 10px 12px;
-  font-family: var(--code-font);
-  font-size: 13px;
-  margin-top: 12px;
-}
-.custom-input-footer {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 9px;
-  margin-top: 10px;
-}
-.custom-input-footer > code {
-  overflow-wrap: anywhere;
-}
-.custom-input > small {
-  display: block;
-  font-size: 10px;
-  line-height: 1.65;
-  color: #8f9eb4;
-  margin-top: 12px;
 }
 .submission-row {
   display: flex;

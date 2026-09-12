@@ -158,6 +158,7 @@ describe('hosted sandbox execution boundary', { concurrency: false }, () => {
     const run = fixture();
     // Shared request/spec validation is covered exhaustively in execution.test.mjs.
     await assert.rejects(run.run(null), errorWith(400, 'invalid_request'));
+    await assert.rejects(run.run(request({ mode: 'custom' })), errorWith(400, 'invalid_request'));
     await assert.rejects(
       run.run(request(), { ...problem, gradingSpec: null }),
       errorWith(503, 'grading_unavailable'),
@@ -183,8 +184,7 @@ describe('hosted sandbox execution boundary', { concurrency: false }, () => {
     const code = 'print("literal ; & $(whoami) 🐍")\n';
     const body = request({
       code,
-      mode: 'custom',
-      customArgs: '([1, 3], 3)',
+      mode: 'example',
       runtime: 'javascript',
       image: 'evil-image',
       mounts: ['/private:/host'],
@@ -213,8 +213,7 @@ describe('hosted sandbox execution boundary', { concurrency: false }, () => {
       problemVersion: VERSION,
       spec: gradingSpec,
       code,
-      mode: 'custom',
-      customArgs: '([1, 3], 3)',
+      mode: 'example',
     });
     assert.ok(options.signal instanceof AbortSignal);
     assert.ok(!JSON.stringify(run.calls.creates).includes('counterfeit'));

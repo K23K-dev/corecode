@@ -5,7 +5,6 @@ import { plainObject, RequestError } from '../server/validation.mjs';
 
 const MAX_CODE_CHARACTERS = 32_768;
 const MAX_CODE_BYTES = 51_200;
-const MAX_CUSTOM_INPUT_CHARACTERS = 8_192;
 const MAX_OUTPUT_BYTES = 512_000;
 const MAX_RESULT_CASES = 32;
 const MAX_RUNNER_PAYLOAD_BYTES = 1024 * 1024;
@@ -90,14 +89,8 @@ function validateExecutionRequest(body, problem) {
   ) {
     throw new RequestError('Keep code under 32,768 characters and 50 KiB.');
   }
-  if (!['example', 'submit', 'custom'].includes(body.mode)) {
+  if (!['example', 'submit'].includes(body.mode)) {
     throw new RequestError('Invalid run mode.');
-  }
-  if (
-    body.mode === 'custom' &&
-    (typeof body.customArgs !== 'string' || body.customArgs.length > MAX_CUSTOM_INPUT_CHARACTERS)
-  ) {
-    throw new RequestError('Invalid custom input.');
   }
 }
 
@@ -159,7 +152,6 @@ function createRunnerPayload(body, problem, spec) {
     code: body.code,
     mode: body.mode,
   };
-  if (body.mode === 'custom') payload.customArgs = body.customArgs;
   const serialized = JSON.stringify(payload);
   if (Buffer.byteLength(serialized) > MAX_RUNNER_PAYLOAD_BYTES) throw gradingUnavailable();
   return serialized;

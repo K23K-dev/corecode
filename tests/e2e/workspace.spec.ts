@@ -492,9 +492,7 @@ test('running with pending or open autocomplete leaves no browser errors', async
   expect(errors).toEqual([]);
 });
 
-test('real run, full submit, failed case details, custom input, and persisted history', async ({
-  page,
-}) => {
+test('real run, full submit, failed case details, and persisted history', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', (error) => errors.push(error.stack ?? error.message));
   await page.goto(`/problems/${defaultId}`);
@@ -542,19 +540,6 @@ test('real run, full submit, failed case details, custom input, and persisted hi
   ]);
   await expect(page.getByText('Your Output', { exact: true })).toBeVisible();
   await expect(page.getByText('Expected Output', { exact: true })).toBeVisible();
-  await page.getByRole('tab', { name: 'Custom input' }).click();
-  await page.getByLabel('Function arguments', { exact: true }).fill("('Hi!',)");
-  await page.getByRole('button', { name: 'Run input' }).click();
-  await expect(page.getByText('Custom run', { exact: true })).toBeVisible({ timeout: 45_000 });
-  await expect(page.getByText('Not graded', { exact: true })).toBeVisible();
-  await expect(page.locator('.case-detail')).toContainText("'hi!'");
-  await expect(page.locator('.case-detail .value-block > span')).toHaveText([
-    'Input',
-    'Your Output',
-  ]);
-  await expect(
-    page.locator('.case-detail .correct-output, .case-detail .wrong-output'),
-  ).toHaveCount(0);
   await page.getByRole('tab', { name: /Submissions/ }).click();
   await expect(page.locator('.submission-row')).toHaveCount(2);
   await page.getByRole('link', { name: 'Code Practice library', exact: true }).click();
@@ -770,20 +755,14 @@ test('tabs support arrows, editor escapes Tab focus, and dialogs restore focus',
   await expect(problemTabs.getByRole('tab', { name: 'Question', exact: true })).toBeFocused();
   const consoleToggle = page.getByRole('button', { name: 'Console', exact: true });
   await expect(consoleToggle).toHaveAttribute('aria-expanded', 'false');
-  await expect(page.getByRole('tab', { name: 'Results', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('heading', { name: 'Results', exact: true })).toHaveCount(0);
   await consoleToggle.click();
   await expect(consoleToggle).toHaveAttribute('aria-expanded', 'true');
-  await page.getByRole('tab', { name: 'Results', exact: true }).focus();
-  await page.keyboard.press('ArrowRight');
-  await expect(page.getByRole('tab', { name: 'Custom input' })).toBeFocused();
-  await expect(page.getByRole('tab', { name: 'Custom input' })).toHaveAttribute(
-    'aria-selected',
-    'true',
-  );
-  await page.keyboard.press('End');
-  await expect(page.getByRole('tab', { name: 'Custom input' })).toBeFocused();
-  await page.keyboard.press('Home');
-  await expect(page.getByRole('tab', { name: 'Results', exact: true })).toBeFocused();
+  await expect(page.getByRole('heading', { name: 'Results', exact: true })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Results', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('tab', { name: 'Custom input', exact: true })).toHaveCount(0);
+  await expect(page.getByLabel('Function arguments', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Run input', exact: true })).toHaveCount(0);
   const editor = page.getByRole('textbox', { name: 'Python solution editor' });
   await editor.focus();
   await page.keyboard.press('Escape');

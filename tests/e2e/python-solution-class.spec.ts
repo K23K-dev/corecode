@@ -8,8 +8,6 @@ const scenarios = [
     id: 'python-core-normalize-text-01',
     runtime: 'browser-python',
     method: 'normalize_text',
-    custom: "('  MiXeD  ',)",
-    output: "'mixed'",
     code: [
       'class Solution:',
       '    def normalize_text(self, text):',
@@ -31,8 +29,6 @@ const scenarios = [
     id: 'python-core-rectangle-metrics-01',
     runtime: 'python',
     method: 'rectangle_metrics',
-    custom: '(5, 6)',
-    output: '(30, 22)',
     code: [
       'class Solution:',
       '    def rectangle_metrics(self, width, height):',
@@ -69,7 +65,7 @@ async function setCode(page: Page, code: string) {
 }
 
 for (const scenario of scenarios) {
-  test(`${scenario.label} Solution methods support real Run, Submit, and custom input`, async ({
+  test(`${scenario.label} Solution methods support real Run and Submit`, async ({
     page,
     database,
     catalog,
@@ -122,23 +118,6 @@ for (const scenario of scenarios) {
       total: exercise.cases.length,
     });
 
-    await page.getByRole('tab', { name: 'Custom input', exact: true }).click();
-    await page.getByLabel('Function arguments', { exact: true }).fill(scenario.custom);
-    await page.getByRole('button', { name: 'Run input', exact: true }).click();
-    await expect(page.getByText('Custom run', { exact: true })).toBeVisible({ timeout: 45_000 });
-    await expect(page.getByText('Not graded', { exact: true })).toBeVisible();
-    await expect(page.locator('.case-detail [aria-label="Your Output"] pre')).toHaveText(
-      scenario.output,
-    );
-    await expect(page.locator('.case-detail .expected-output')).toHaveCount(0);
-    expect(
-      (
-        await database.client.query(
-          `SELECT count(*)::int AS count FROM ${database.schema}.cp_submissions WHERE exercise_id=$1`,
-          [scenario.id],
-        )
-      ).rows[0].count,
-    ).toBe(1);
     await page.reload();
     await expectEditorCode(page, scenario.code);
     await expect(page.locator('.solved-label')).toBeVisible();

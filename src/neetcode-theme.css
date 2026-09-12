@@ -514,7 +514,7 @@ textarea {
   background: #303030;
   border-radius: 4px;
 }
-/* Results, custom inputs, and saved submissions. */
+/* Results and saved submissions. */
 .ide-view .result-panel {
   flex: 0 1 42%;
   min-height: 205px;
@@ -523,24 +523,15 @@ textarea {
   border-color: var(--border);
   overflow: hidden;
 }
-.result-tabs {
+.result-header {
   min-height: 38px;
-  gap: 22px;
   padding: 0 22px;
   border-color: var(--border);
   flex-shrink: 0;
 }
-.result-tabs > button {
-  color: var(--muted);
-  font-size: 14px;
-}
-.result-tabs > button.active {
+.result-header h2 {
   color: var(--text);
-  border-bottom-color: #aaa;
-}
-.result-tabs small {
-  color: #d5d5d5;
-  background: #3a3a3a;
+  font-size: 14px;
 }
 .result-content {
   padding: 18px 22px 22px;
@@ -616,25 +607,6 @@ textarea {
 }
 .execution-error pre {
   color: #ffc0c0;
-}
-.custom-input {
-  padding: 18px 22px;
-}
-.custom-input label {
-  color: #e0e0e0;
-  font-size: 13px;
-}
-.custom-input p {
-  color: var(--muted);
-  font-size: 14px;
-}
-.custom-input textarea {
-  background: #202020;
-  border-color: #505050;
-}
-.custom-input-footer > code {
-  color: #bbb;
-  font-size: 11px;
 }
 .submission-list {
   padding: 0;
@@ -880,12 +852,11 @@ textarea {
     min-height: 185px;
     max-height: 48%;
   }
-  .result-tabs {
+  .result-header {
     min-height: 36px;
     padding: 0 16px;
   }
-  .result-content,
-  .custom-input {
+  .result-content {
     padding: 16px;
   }
   .submission-row {

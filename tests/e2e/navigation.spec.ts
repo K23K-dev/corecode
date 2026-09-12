@@ -3,7 +3,7 @@ import { fixtureDecks, fixtureExercises } from '../database-fixtures';
 import type { StateSnapshot } from '../../src/lib/database-client';
 import { practiceClock, summarizeActivity } from '../../shared/practice-activity.mjs';
 
-// This narrow migration smoke test never calls a database or code runner. The
+// This narrow UI smoke test never calls a database or code runner. The
 // default E2E suite still uses its separately authorized, guarded Neon schema.
 test.skip(process.env.CODE_PRACTICE_E2E_OFFLINE !== '1', 'Explicit offline mode only.');
 
@@ -175,12 +175,28 @@ test('Next routes preserve navigation, drafts, and submission feedback without e
 
   await page.getByRole('button', { name: 'Run example', exact: true }).click();
   await expect(page.getByText('Example passed', { exact: true })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Results', exact: true })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Results', exact: true })).toHaveCount(0);
+  await expect(page.getByRole('tab', { name: 'Custom input', exact: true })).toHaveCount(0);
+  await expect(page.getByLabel('Function arguments', { exact: true })).toHaveCount(0);
+  await expect(page.getByRole('button', { name: 'Run input', exact: true })).toHaveCount(0);
   await expect(page.locator('.submission-celebration')).toHaveCount(0);
-  expect(api.runs.at(-1)).toMatchObject({ mode: 'example', code: draft });
+  expect(api.runs.at(-1)).toEqual({
+    problemId: problem.id,
+    problemVersion: problem.version,
+    mode: 'example',
+    code: draft,
+  });
+  expect(api.state().progress.exercises[problem.id].attempts).toHaveLength(0);
   await page.getByRole('button', { name: 'Submit', exact: true }).click();
   await expect(page.getByText('Accepted', { exact: true })).toBeVisible();
   await expect(page.locator('.app')).toHaveAttribute('data-save-state', 'saved');
-  expect(api.runs.at(-1)).toMatchObject({ mode: 'submit', code: draft });
+  expect(api.runs.at(-1)).toEqual({
+    problemId: problem.id,
+    problemVersion: problem.version,
+    mode: 'submit',
+    code: draft,
+  });
   expect(api.state().progress.exercises[problem.id].attempts).toHaveLength(1);
   await expect(page.locator('.case-detail .value-block > span')).toHaveText([
     'Input',
@@ -194,6 +210,8 @@ test('Next routes preserve navigation, drafts, and submission feedback without e
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole('button', { name: 'Code & results', exact: true }).click();
   await expect(editor).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Results', exact: true })).toBeVisible();
+  await expect(page.getByRole('tab', { name: 'Custom input', exact: true })).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
   await page.screenshot({ path: testInfo.outputPath('next-workspace-mobile.png'), fullPage: true });
 

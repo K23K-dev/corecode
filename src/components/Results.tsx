@@ -3,7 +3,7 @@ import { Check, CircleAlert, CircleCheck, LoaderCircle, Terminal, X } from 'luci
 import type { RunResult } from '../lib/practice-runner';
 
 export interface Execution {
-  mode: 'example' | 'submit' | 'custom';
+  mode: 'example' | 'submit';
   result?: RunResult;
   error?: string;
   code?: string;
@@ -87,13 +87,12 @@ export default function Results({
   const result = execution.result;
   if (!result) return null;
   const passed = result.cases.filter((test) => test.passed).length;
-  const custom = execution.mode === 'custom';
-  const success = !custom && passed === result.cases.length && result.cases.length > 0;
+  const success = passed === result.cases.length && result.cases.length > 0;
   const test = result.cases[active] ?? result.cases[0];
   const outputState =
-    test?.error || (!custom && test?.passed === false)
+    test?.error || test?.passed === false
       ? 'wrong-output'
-      : !custom && test?.passed === true
+      : test?.passed === true
         ? 'correct-output'
         : '';
   return (
@@ -103,44 +102,33 @@ export default function Results({
           Your code has changed. These results are from the previous run.
         </p>
       )}
-      <div
-        className={`result-heading ${success ? 'success' : custom ? '' : 'failure'}`}
-        role="status"
-      >
-        {success ? (
-          <CircleCheck size={20} />
-        ) : custom ? (
-          <Terminal size={20} />
-        ) : (
-          <CircleAlert size={20} />
-        )}
+      <div className={`result-heading ${success ? 'success' : 'failure'}`} role="status">
+        {success ? <CircleCheck size={20} /> : <CircleAlert size={20} />}
         <strong>
-          {custom
-            ? 'Custom run'
-            : success
-              ? execution.mode === 'submit'
-                ? 'Accepted'
-                : 'Example passed'
-              : 'Not quite yet'}
+          {success
+            ? execution.mode === 'submit'
+              ? 'Accepted'
+              : 'Example passed'
+            : 'Not quite yet'}
         </strong>
-        <span>{custom ? 'Not graded' : `${passed} / ${result.cases.length} cases passed`}</span>
+        <span>
+          {passed} / {result.cases.length} cases passed
+        </span>
       </div>
-      {!custom && (
-        <div className="case-tabs" aria-label="Test cases">
-          {result.cases.map((item, index) => (
-            <button
-              key={index}
-              className={`${active === index ? 'active' : ''} ${item.passed ? 'pass' : 'fail'}`}
-              onClick={() => setActive(index)}
-              aria-pressed={active === index}
-              aria-label={`Case ${index + 1}: ${item.passed ? 'passed' : 'failed'}`}
-              title={item.name}
-            >
-              {item.passed ? <Check size={13} /> : <X size={13} />} Case {index + 1}
-            </button>
-          ))}
-        </div>
-      )}
+      <div className="case-tabs" aria-label="Test cases">
+        {result.cases.map((item, index) => (
+          <button
+            key={index}
+            className={`${active === index ? 'active' : ''} ${item.passed ? 'pass' : 'fail'}`}
+            onClick={() => setActive(index)}
+            aria-pressed={active === index}
+            aria-label={`Case ${index + 1}: ${item.passed ? 'passed' : 'failed'}`}
+            title={item.name}
+          >
+            {item.passed ? <Check size={13} /> : <X size={13} />} Case {index + 1}
+          </button>
+        ))}
+      </div>
       {test && (
         <div className="case-detail">
           <section className="value-block" aria-label="Input">
@@ -154,7 +142,7 @@ export default function Results({
             <span>{test.error ? 'Error' : 'Your Output'}</span>
             <pre>{test.error ?? test.actual ?? '(no output)'}</pre>
           </section>
-          {!custom && test.expected !== undefined && (
+          {test.expected !== undefined && (
             <section className="value-block expected-output" aria-label="Expected Output">
               <span>Expected Output</span>
               <pre>{test.expected}</pre>

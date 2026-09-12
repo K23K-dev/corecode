@@ -1,13 +1,6 @@
 'use client';
 
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  useSyncExternalStore,
-  type KeyboardEvent as ReactKeyboardEvent,
-} from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { useRouter } from 'next/navigation';
@@ -21,7 +14,6 @@ import {
   ChevronUp,
   Code2,
   List,
-  Play,
   RotateCcw,
   Square,
   X,
@@ -45,7 +37,6 @@ import {
 import { OUTBOX_PREFIX, type Catalog, type ProgressClient } from './lib/database-client';
 import { PracticeRunner } from './lib/practice-runner';
 
-type Pane = 'results' | 'input';
 const CodeEditor = dynamic(() => import('./components/CodeEditor'), { ssr: false });
 const ProblemPanel = dynamic(() => import('./components/ProblemPanel'));
 
@@ -129,8 +120,6 @@ function WorkspaceApp({
   const [showProgress, setShowProgress] = useState(false);
   const [showReset, setShowReset] = useState(false);
   const [mobilePane, setMobilePane] = useState('problem');
-  const [pane, setPane] = useState<Pane>('results');
-  const [customInput, setCustomInput] = useState(exercise.customInput ?? '()');
   const [execution, setExecution] = useState<Execution | null>(null);
   const [celebration, setCelebration] = useState<number | null>(null);
   const [running, setRunning] = useState(false);
@@ -141,10 +130,6 @@ function WorkspaceApp({
   const code = data.exercises[exercise.id]?.draft ?? exercise.starterCode;
   const attempts = data.exercises[exercise.id]?.attempts ?? [];
   const ready = Boolean(exercise.cases?.length);
-  const supportsCustomInput =
-    exercise.runtime === 'browser-python' ||
-    !exercise.runtime ||
-    Boolean(exercise.supportsCustomInput);
   const currentIndex = readyExercises.findIndex((item) => item.id === exercise.id);
 
   useEffect(() => {
@@ -228,13 +213,12 @@ function WorkspaceApp({
   }
 
   const execute = useCallback(
-    async (mode: 'example' | 'submit' | 'custom') => {
+    async (mode: 'example' | 'submit') => {
       if (running || !exercise.cases || !runner.current) return;
       const ticket = ++request.current;
       const submittedCode = code;
       const started = performance.now();
       setCelebration(null);
-      setPane('results');
       setExecution(null);
       setRunning(true);
       setMobilePane('code');
@@ -242,7 +226,7 @@ function WorkspaceApp({
       setConsoleOpen(true);
       let attempt: Attempt | undefined;
       try {
-        const result = await runner.current.run(exercise, submittedCode, mode, customInput);
+        const result = await runner.current.run(exercise, submittedCode, mode);
         if (ticket !== request.current) return;
         setExecution({ mode, result, code: submittedCode });
         if (mode === 'submit') {
@@ -308,7 +292,7 @@ function WorkspaceApp({
         }));
       }
     },
-    [running, exercise, code, customInput, setData],
+    [running, exercise, code, setData],
   );
   useEffect(() => {
     const shortcut = (event: KeyboardEvent) => {
@@ -331,32 +315,6 @@ function WorkspaceApp({
     runner.current?.cancel();
     setRunning(false);
     setExecution({ mode: 'example', error: 'Run canceled. Your code is still in the editor.' });
-  }
-
-  function navigateConsoleTabs(event: ReactKeyboardEvent<HTMLDivElement>) {
-    if (!supportsCustomInput) return;
-    const order: Pane[] = ['results', 'input'];
-    const index = order.indexOf(pane);
-    let next: number;
-
-    switch (event.key) {
-      case 'ArrowRight':
-      case 'ArrowLeft':
-        next = 1 - index;
-        break;
-      case 'Home':
-        next = 0;
-        break;
-      case 'End':
-        next = 1;
-        break;
-      default:
-        return;
-    }
-
-    event.preventDefault();
-    setPane(order[next]);
-    event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next].focus();
   }
 
   function restoreProgress(next: ProgressData) {
@@ -509,79 +467,18 @@ function WorkspaceApp({
                   </div>
                 )}
                 {consoleOpen && (
-                  <div className="result-panel">
-                    <div
-                      className="result-tabs"
-                      role="tablist"
-                      aria-label="Execution details"
-                      onKeyDown={navigateConsoleTabs}
-                    >
-                      <button
-                        role="tab"
-                        tabIndex={pane === 'results' ? 0 : -1}
-                        aria-selected={pane === 'results'}
-                        aria-controls="console-content"
-                        id="tab-results"
-                        className={pane === 'results' ? 'active' : ''}
-                        onClick={() => setPane('results')}
-                      >
-                        Results
-                      </button>
-                      {supportsCustomInput && (
-                        <button
-                          role="tab"
-                          tabIndex={pane === 'input' ? 0 : -1}
-                          aria-selected={pane === 'input'}
-                          aria-controls="console-content"
-                          id="tab-input"
-                          className={pane === 'input' ? 'active' : ''}
-                          onClick={() => setPane('input')}
-                        >
-                          Custom input
-                        </button>
-                      )}
+                  <section className="result-panel" aria-labelledby="console-results-title">
+                    <header className="result-header">
+                      <h2 id="console-results-title">Results</h2>
+                    </header>
+                    <div className="result-body">
+                      <Results
+                        execution={execution}
+                        running={running}
+                        stale={Boolean(execution?.code && execution.code !== code)}
+                      />
                     </div>
-                    <div
-                      className="result-body"
-                      role="tabpanel"
-                      id="console-content"
-                      aria-labelledby={'tab-' + pane}
-                    >
-                      {pane === 'results' && (
-                        <Results
-                          execution={execution}
-                          running={running}
-                          stale={Boolean(execution?.code && execution.code !== code)}
-                        />
-                      )}
-                      {pane === 'input' && (
-                        <div className="custom-input">
-                          <label htmlFor="custom-arguments">Function arguments</label>
-                          <p>
-                            Use a Python tuple, such as <code>('hello',)</code> for one argument.
-                            Custom runs are not graded.
-                          </p>
-                          <textarea
-                            id="custom-arguments"
-                            value={customInput}
-                            onChange={(event) => setCustomInput(event.target.value)}
-                            maxLength={8000}
-                            spellCheck={false}
-                            disabled={!ready || running}
-                          />
-                          <div className="custom-input-footer">
-                            <button
-                              className="button secondary"
-                              disabled={!ready || running}
-                              onClick={() => void execute('custom')}
-                            >
-                              <Play size={14} /> Run input
-                            </button>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
+                  </section>
                 )}
                 <div className="action-bar">
                   <button

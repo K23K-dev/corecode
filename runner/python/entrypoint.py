@@ -47,7 +47,7 @@ def _request_spec(job):
             raise ValueError('The shell grading case is incomplete.')
     if not isinstance(job.get('code'), str) or len(job['code'].encode('utf-8')) > MAX_CODE_BYTES:
         raise ValueError('Code must be text of at most 50 KiB.')
-    if job.get('mode', 'example') not in ('example', 'run', 'submit', 'custom'):
+    if job.get('mode', 'example') not in ('example', 'run', 'submit'):
         raise ValueError('Unknown execution mode.')
     return spec
 
@@ -224,33 +224,22 @@ def run(job):
     cases = spec['cases'] if job.get('mode') == 'submit' else spec['cases'][:1]
     output = BoundedOutput()
     results = []
-    if job.get('mode') == 'custom':
-        if not spec.get('entryPoint') or spec['runtime'] != 'python':
-            raise ValueError('This problem uses predefined scenarios, not positional function arguments.')
-        args = ast.literal_eval(job['customArgs'])
-        if not isinstance(args, tuple):
-            raise ValueError('Enter a tuple of positional arguments.')
-        with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
-            module = solution_module(code)
-            value = entry_point(module, spec['entryPoint'])(*args)
-        results.append({'name': 'Custom input', 'input': job['customArgs'], 'expected': '', 'actual': repr(value)[:4000], 'passed': None})
-    else:
-        for case in cases:
-            result = {'name': case['name'], 'input': case.get('input', case.get('args', '')), 'expected': case['expected'], 'passed': False, 'actual': ''}
-            try:
-                with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
-                    if spec['runtime'] == 'sql':
-                        result['actual'] = sql_case(code, case)
-                    elif spec['runtime'] == 'shell':
-                        from shell_harness import shell_case
-                        result['actual'] = shell_case(code, case)
-                    else:
-                        result['actual'] = python_case(code, case, dependencies)
-                result['passed'] = True
-            except BaseException as error:
-                result['error'] = (type(error).__name__ + ': ' + str(error))[:4000]
-                result['actual'] = str(error)[:4000] or 'Behavior check did not pass'
-            results.append(result)
+    for case in cases:
+        result = {'name': case['name'], 'input': case.get('input', case.get('args', '')), 'expected': case['expected'], 'passed': False, 'actual': ''}
+        try:
+            with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
+                if spec['runtime'] == 'sql':
+                    result['actual'] = sql_case(code, case)
+                elif spec['runtime'] == 'shell':
+                    from shell_harness import shell_case
+                    result['actual'] = shell_case(code, case)
+                else:
+                    result['actual'] = python_case(code, case, dependencies)
+            result['passed'] = True
+        except BaseException as error:
+            result['error'] = (type(error).__name__ + ': ' + str(error))[:4000]
+            result['actual'] = str(error)[:4000] or 'Behavior check did not pass'
+        results.append(result)
     return {'cases': results, 'stdout': output.getvalue(), 'durationMs': round((time.perf_counter() - started)*1000)}
 
 

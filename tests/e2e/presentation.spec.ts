@@ -149,7 +149,7 @@ test.describe('Fresh submission celebration', () => {
     await expect(page.getByText('Accepted', { exact: true })).toBeVisible();
   });
 
-  test('examples, custom runs, partial suites, failures, and execution errors do not celebrate', async ({
+  test('examples, partial suites, failures, and execution errors do not celebrate', async ({
     page,
     catalog,
   }) => {
@@ -159,13 +159,6 @@ test.describe('Fresh submission celebration', () => {
     await page.goto(`/problems/${problemId}`);
     await page.getByRole('button', { name: 'Run example', exact: true }).click();
     await expect(page.getByText('Example passed', { exact: true })).toBeVisible();
-    await expect(page.locator(celebration)).toHaveCount(0);
-    await page.getByRole('tab', { name: 'Custom input', exact: true }).click();
-    await page.getByLabel('Function arguments', { exact: true }).fill("('  Mixed  ',)");
-    // Even bogus grading fields in a custom response must remain non-celebratory.
-    result = accepted;
-    await page.getByRole('button', { name: 'Run input', exact: true }).click();
-    await expect(page.getByText('Custom run', { exact: true })).toBeVisible();
     await expect(page.locator(celebration)).toHaveCount(0);
 
     for (const response of [
@@ -507,7 +500,7 @@ test.describe('Execution results', () => {
     }, testInfo) => {
       await page.setViewportSize({ width, height: 1000 });
       // Only layout scenarios are stubbed. workspace.spec.ts separately executes
-      // real Python pass/fail/custom runs against these same value-label contracts.
+      // real Python pass/fail runs against these same value-label contracts.
       let result: RunResult = { cases, stdout: 'checked rectangle dimensions\n', durationMs: 1 };
       await page.route('**/api/run', (route) => route.fulfill({ json: result }));
       await page.goto(`/problems/${problemId}`);
@@ -610,47 +603,15 @@ test.describe('Execution results', () => {
     });
   }
 
-  test('custom results stay ungraded and runner failures remain actionable', async ({ page }) => {
-    // Custom mode must remain neutral even if a runner supplies grading fields.
-    let result: RunResult = {
-      cases: [
-        {
-          name: 'Custom input',
-          input: '(3, 4)',
-          actual: '(12, 14)',
-          expected: '(12, 14)',
-          passed: true,
-        },
-      ],
-      stdout: '',
-      durationMs: 1,
-    };
-    await page.route('**/api/run', (route) => route.fulfill({ json: result }));
-    await page.goto(`/problems/${problemId}`);
-    await page.getByRole('button', { name: 'Console', exact: true }).click();
-    await page.getByRole('tab', { name: 'Custom input', exact: true }).click();
-    await page.getByLabel('Function arguments', { exact: true }).fill('(3, 4)');
-    await page.getByRole('button', { name: 'Run input', exact: true }).click();
-    await expect(page.getByText('Custom run', { exact: true })).toBeVisible();
-    await expect(page.getByText('Not graded', { exact: true })).toBeVisible();
-    await expectStackedValues(page, ['Input', 'Your Output']);
-    await expect(page.locator('.case-tabs')).toHaveCount(0);
-    await expect(
-      page.locator('.case-detail .correct-output, .case-detail .wrong-output'),
-    ).toHaveCount(0);
-    await expect(page.locator('.case-detail .value-block').nth(1).locator('pre')).toHaveCSS(
-      'border-left-color',
-      'rgba(0, 0, 0, 0)',
-    );
-    await expect(page.locator('.result-heading')).not.toHaveClass(/success|failure/);
-    await expect(page.locator('.solved-label')).toHaveCount(0);
-
-    result = {
+  test('runner failures remain actionable', async ({ page }) => {
+    const result: RunResult = {
       cases: [],
       stdout: '',
       durationMs: 1,
       error: 'The isolated runner is unavailable. Restart the local runner, then try again.',
     };
+    await page.route('**/api/run', (route) => route.fulfill({ json: result }));
+    await page.goto(`/problems/${problemId}`);
     await page.getByRole('button', { name: 'Run example', exact: true }).click();
     const error = page.getByRole('alert').filter({ hasText: 'Run stopped' });
     await expect(error).toContainText(

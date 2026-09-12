@@ -13,7 +13,6 @@ export interface Exercise {
   starterCode: string;
   referenceCode: string;
   runtime?: 'browser-python' | 'python' | 'javascript' | 'sql' | 'shell';
-  supportsCustomInput?: boolean;
   explanation?: string;
   solutionAlternatives?: {
     title: string;
@@ -31,6 +30,5 @@ export interface Exercise {
     outputLabel?: string;
   }[];
   entryPoint?: string;
-  customInput?: string;
   cases?: TestCase[];
 }

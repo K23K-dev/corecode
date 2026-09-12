@@ -306,11 +306,6 @@ describe.skipIf(!verifyNeonCatalog)('read-only Neon catalog contracts', () => {
           expect(exercise.language, exercise.id).toBe('Python');
           expect(exercise.extension, exercise.id).toBe('py');
         }
-        if (exercise.supportsCustomInput) {
-          expect(['python', 'browser-python'], exercise.id).toContain(exercise.runtime);
-          expect(exercise.entryPoint, exercise.id).toMatch(/^[A-Za-z_][A-Za-z0-9_]{0,63}$/);
-          expect(typeof exercise.customInput, exercise.id).toBe('string');
-        }
       }
     });
 
@@ -399,7 +394,6 @@ describe.skipIf(!verifyNeonCatalog)('read-only Neon catalog contracts', () => {
         expect(exercise.cases.length).toBeLessThanOrEqual(32);
         expect(new Set(exercise.cases.map((test) => test.name)).size).toBe(exercise.cases.length);
         expect(new Set(exercise.cases.map((test) => test.args)).size).toBe(exercise.cases.length);
-        expect(exercise.customInput).toBe(exercise.cases[0].args);
         expect(exercise.examples).toHaveLength(2);
         exercise.examples.forEach((example, index) => {
           expect(example.input).toBe(exampleCall(exercise.entryPoint!, exercise.cases[index].args));

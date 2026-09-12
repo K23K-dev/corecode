@@ -156,26 +156,8 @@ export async function runRequest(request) {
     const runtimeSpec = { ...spec, id: request.problemId };
     const backend = request.problemId.startsWith('backend-');
     const mode = request.mode ?? 'submit';
-    if (!['submit', 'example', 'run', 'custom'].includes(mode))
-      throw new Error('Unknown execution mode.');
-    let tests = mode === 'example' || mode === 'run' ? spec.cases.slice(0, 1) : spec.cases;
-    if (mode === 'custom') {
-      if (!spec.customInput)
-        throw new Error(
-          'This exercise uses DOM or dependency fixtures. Custom JSON arguments are available for the plain data-function exercises only.',
-        );
-      if (typeof request.customArgs !== 'string' || request.customArgs.length > 8000)
-        throw new Error('Custom arguments must be a JSON array under 8,000 characters.');
-      let args;
-      try {
-        args = JSON.parse(request.customArgs);
-      } catch {
-        throw new Error('Enter a JSON array of function arguments.');
-      }
-      if (!Array.isArray(args) || args.length > 20)
-        throw new Error('Custom arguments must be a JSON array of at most 20 arguments.');
-      tests = [{ name: 'Custom input', input: request.customArgs, args, custom: true }];
-    }
+    if (!['submit', 'example', 'run'].includes(mode)) throw new Error('Unknown execution mode.');
+    const tests = mode === 'example' || mode === 'run' ? spec.cases.slice(0, 1) : spec.cases;
     const compiled = await compile(request.code, runtimeSpec, backend);
     if (!backend)
       browser = await chromium.launch({
@@ -196,7 +178,7 @@ export async function runRequest(request) {
       const result = {
         name: test.name,
         input: bounded(test.input),
-        ...(test.custom ? {} : { expected: bounded(test.expected) }),
+        expected: bounded(test.expected),
       };
       try {
         let checked;
@@ -243,7 +225,7 @@ export async function runRequest(request) {
         Object.assign(result, checked);
       } catch (error) {
         Object.assign(result, {
-          ...(test.custom ? {} : { passed: false }),
+          passed: false,
           error: errorText(error),
         });
       }

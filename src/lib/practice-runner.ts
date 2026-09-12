@@ -26,12 +26,7 @@ export type RunResult = {
 /** Every exercise uses the private API and its configured isolated execution adapter. */
 export class PracticeRunner {
   private request: AbortController | null = null;
-  async run(
-    exercise: Exercise,
-    code: string,
-    mode: 'example' | 'submit' | 'custom',
-    customArgs: string,
-  ): Promise<RunResult> {
+  async run(exercise: Exercise, code: string, mode: 'example' | 'submit'): Promise<RunResult> {
     const localApp = globalThis.location?.origin === 'http://127.0.0.1:5173';
     const controller = new AbortController();
     this.request = controller;
@@ -47,7 +42,6 @@ export class PracticeRunner {
           problemVersion: exercise.version,
           code,
           mode,
-          ...(mode === 'custom' ? { customArgs } : {}),
         }),
       });
       const text = await response.text();

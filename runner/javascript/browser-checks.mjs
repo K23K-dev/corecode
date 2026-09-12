@@ -1,5 +1,5 @@
 /** This function is serialized into the container's Chromium page, never a host browser. */
-export async function browserCheck({ id, variant, args, value, custom, unchanged, newArray }) {
+export async function browserCheck({ id, variant, args, value, unchanged, newArray }) {
   const candidate = globalThis.__candidate;
   const { React, createRoot } = globalThis.__test;
   const eq = (actual, expected, message = 'Unexpected result') => {
@@ -101,7 +101,6 @@ export async function browserCheck({ id, variant, args, value, custom, unchanged
       check(typeof candidate === 'function', 'The requested function is missing');
       const before = JSON.stringify(args);
       const actual = await candidate(...args);
-      if (custom) return { actual: actual === undefined ? 'undefined' : JSON.stringify(actual) };
       eq(actual, value);
       if (unchanged) eq(JSON.stringify(args), before, 'Input was mutated');
       if (newArray) check(actual !== args[0], 'Return a new array, not the input array');
