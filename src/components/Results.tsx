@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type CSSProperties } from 'react';
 import { Check, CircleAlert, CircleCheck, LoaderCircle, Terminal, X } from 'lucide-react';
 import type { RunResult, RunnerStage } from '../lib/practice-runner';
 
@@ -7,6 +7,33 @@ export interface Execution {
   result?: RunResult;
   error?: string;
   code?: string;
+}
+
+const confettiColors = ['#22c55e', '#559bf8', '#d65fa6', '#f2b84b', '#a482ed'];
+const confetti = Array.from({ length: 28 }, (_, index) => {
+  const angle = ((index % 14) / 13) * Math.PI;
+  return {
+    left: index < 14 ? '15%' : '85%',
+    '--confetti-x': `${Math.round(Math.cos(angle) * 95)}px`,
+    '--confetti-rise': `${Math.round(-30 - Math.sin(angle) * 65)}px`,
+    '--confetti-fall': `${100 + (index % 5) * 18}px`,
+    '--confetti-delay': `${(index % 4) * 45}ms`,
+    '--confetti-color': confettiColors[index % confettiColors.length],
+  } as CSSProperties;
+});
+
+/** Decorative only; the results heading already announces an accepted submission. */
+export function SubmissionCelebration() {
+  return (
+    <div className="submission-celebration" aria-hidden="true">
+      {confetti.map((style, index) => (
+        <span className="submission-confetti" key={index} style={style} />
+      ))}
+      <span className="submission-celebration-check">
+        <Check size={56} strokeWidth={3.5} />
+      </span>
+    </div>
+  );
 }
 
 export default function Results({

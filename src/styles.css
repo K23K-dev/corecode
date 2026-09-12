@@ -397,7 +397,7 @@ h1 {
   max-height: 240px;
   padding: 18px 20px;
   overflow: auto;
-  border-left: 2px solid transparent;
+  border-left: 3px solid transparent;
   border-radius: 4px;
 }
 .stdout {

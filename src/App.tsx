@@ -26,7 +26,7 @@ import Modal from './components/Modal';
 import ProgressModal from './components/ProgressModal';
 import PracticeLibrary from './components/PracticeLibrary';
 import ProblemPanel, { type ProblemTab } from './components/ProblemPanel';
-import Results, { type Execution } from './components/Results';
+import Results, { SubmissionCelebration, type Execution } from './components/Results';
 import type { Exercise } from './lib/exercises';
 import {
   MAX_ATTEMPTS_PER_EXERCISE,
@@ -98,6 +98,7 @@ function WorkspaceApp({ catalog, client }: { catalog: Catalog; client: ProgressC
   const [pane, setPane] = useState<Pane>('results');
   const [customInput, setCustomInput] = useState(exercise.customInput ?? '()');
   const [execution, setExecution] = useState<Execution | null>(null);
+  const [celebration, setCelebration] = useState<number | null>(null);
   const [stage, setStage] = useState<RunnerStage | null>(null);
   const [notice, setNotice] = useState('');
   const [viewAttempt, setViewAttempt] = useState<Attempt | null>(null);
@@ -111,6 +112,12 @@ function WorkspaceApp({ catalog, client }: { catalog: Catalog; client: ProgressC
     !exercise.runtime ||
     Boolean(exercise.supportsCustomInput);
   const currentIndex = readyExercises.findIndex((item) => item.id === exercise.id);
+
+  useEffect(() => {
+    if (celebration === null) return;
+    const timer = window.setTimeout(() => setCelebration(null), 2200);
+    return () => window.clearTimeout(timer);
+  }, [celebration]);
 
   useEffect(() => {
     try {
@@ -156,6 +163,7 @@ function WorkspaceApp({ catalog, client }: { catalog: Catalog; client: ProgressC
       setExercise(next);
       setCustomInput(next.customInput ?? '()');
       setExecution(null);
+      setCelebration(null);
       setLeftTab(tab);
       setPane('results');
       setNotice('');
@@ -173,6 +181,7 @@ function WorkspaceApp({ catalog, client }: { catalog: Catalog; client: ProgressC
         runner.current?.cancel();
         setStage(null);
         setPage('library');
+        setCelebration(null);
       } else selectExercise(initialExercise(), false);
     };
     window.addEventListener('popstate', navigate);
@@ -191,6 +200,7 @@ function WorkspaceApp({ catalog, client }: { catalog: Catalog; client: ProgressC
     runner.current?.cancel();
     setStage(null);
     setPage('library');
+    setCelebration(null);
     history.pushState(null, '', '#library');
   }
 
@@ -220,6 +230,7 @@ function WorkspaceApp({ catalog, client }: { catalog: Catalog; client: ProgressC
       const ticket = ++request.current;
       const submittedCode = code;
       const started = performance.now();
+      setCelebration(null);
       setPane('results');
       setExecution(null);
       setStage('loading');
@@ -252,6 +263,14 @@ function WorkspaceApp({ catalog, client }: { catalog: Catalog; client: ProgressC
             status: result.error ? 'error' : passed === total ? 'accepted' : 'failed',
             durationMs: result.durationMs,
           };
+          if (
+            attempt.status === 'accepted' &&
+            total > 0 &&
+            result.cases.length === total &&
+            result.cases.every((test) => test.passed === true && !test.error)
+          ) {
+            setCelebration(ticket);
+          }
         }
       } catch (reason) {
         if (ticket !== request.current) return;
@@ -312,6 +331,7 @@ function WorkspaceApp({ catalog, client }: { catalog: Catalog; client: ProgressC
     return () => window.removeEventListener('keydown', shortcut);
   }, [execute, page]);
   function cancel() {
+    setCelebration(null);
     ++request.current;
     runner.current?.cancel();
     setStage(null);
@@ -345,6 +365,7 @@ function WorkspaceApp({ catalog, client }: { catalog: Catalog; client: ProgressC
   }
 
   function restoreProgress(next: ProgressData) {
+    setCelebration(null);
     ++request.current;
     runner.current?.cancel();
     setStage(null);
@@ -353,6 +374,7 @@ function WorkspaceApp({ catalog, client }: { catalog: Catalog; client: ProgressC
   }
 
   function resetDraft() {
+    setCelebration(null);
     updateDraft(exercise.starterCode);
     setShowReset(false);
     setExecution(null);
@@ -476,6 +498,7 @@ function WorkspaceApp({ catalog, client }: { catalog: Catalog; client: ProgressC
                     }
                     readOnly={Boolean(stage)}
                   />
+                  {celebration !== null && <SubmissionCelebration key={celebration} />}
                 </div>
                 {notice && (
                   <div className="notice" role="alert">

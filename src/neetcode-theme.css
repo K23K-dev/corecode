@@ -362,12 +362,104 @@ textarea {
   font-size: 13px;
 }
 .ide-view .editor-area {
+  position: relative;
   flex: 1 1 0;
   min-height: 80px;
   overflow: hidden;
 }
 .editor-area .cm-editor:focus-within {
   box-shadow: none;
+}
+/* A one-shot accepted-submit celebration; never changes layout or captures input. */
+.submission-celebration {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  overflow: hidden;
+  pointer-events: none;
+}
+.submission-celebration-check {
+  position: absolute;
+  bottom: 16px;
+  left: 28px;
+  display: grid;
+  place-items: center;
+  width: 108px;
+  height: 108px;
+  border-radius: 50%;
+  color: #22c55e;
+  background: #153c2a;
+  box-shadow: 0 0 36px 12px #22c55e40;
+  animation: submission-check 2100ms ease-out both;
+}
+.submission-confetti {
+  position: absolute;
+  top: 28%;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--confetti-color);
+  box-shadow: 0 0 7px var(--confetti-color);
+  animation: submission-confetti 1800ms ease-out var(--confetti-delay) both;
+}
+.submission-celebration-check svg {
+  stroke-width: 3.5;
+}
+@keyframes submission-check {
+  0% {
+    opacity: 0;
+    transform: scale(0.65);
+  }
+  16% {
+    opacity: 1;
+    transform: scale(1.06);
+  }
+  25%,
+  72% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+@keyframes submission-confetti {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.5);
+  }
+  15% {
+    opacity: 0.8;
+  }
+  40% {
+    opacity: 0.7;
+    transform: translate(var(--confetti-x), var(--confetti-rise)) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--confetti-x), var(--confetti-fall)) scale(0.65);
+  }
+}
+@media (max-width: 700px), (max-height: 600px) {
+  .submission-celebration-check {
+    bottom: 12px;
+    left: 18px;
+    width: 64px;
+    height: 64px;
+  }
+  .submission-celebration-check svg {
+    width: 36px;
+    height: 36px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .submission-celebration-check {
+    animation: none;
+  }
+  .submission-confetti {
+    display: none;
+  }
 }
 .ide-view .action-bar {
   flex-shrink: 0;

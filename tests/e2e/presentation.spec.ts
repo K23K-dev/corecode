@@ -1,8 +1,190 @@
 import type { Page } from '@playwright/test';
-import { expect, test } from './fixtures';
+import { expect, test, type TestCatalog } from './fixtures';
 import type { RunResult } from '../../src/lib/practice-runner';
 
 const removedEditorMetadata = '.save-status, .editor-auto, .editor-filebar';
+
+test.describe('Fresh submission celebration', () => {
+  const problemId = 'python-core-normalize-text-01';
+  const celebration = '.submission-celebration';
+
+  function acceptedResult(catalog: TestCatalog): RunResult {
+    const exercise = catalog.exercises.find((item) => item.id === problemId)!;
+    return {
+      cases: exercise.cases.map((item) => ({
+        name: item.name,
+        input: item.args,
+        expected: item.expected,
+        actual: item.expected,
+        passed: true,
+      })),
+      stdout: '',
+      durationMs: 1,
+    };
+  }
+
+  test('new accepted submissions celebrate briefly without sound, interactive overlays, or layout shifts', async ({
+    page,
+    catalog,
+  }) => {
+    await page.emulateMedia({ reducedMotion: 'no-preference' });
+    await page.addInitScript(() => {
+      const rejectAudio = () => {
+        document.documentElement.dataset.unexpectedAudio = 'true';
+        throw new Error('Submission feedback must remain silent.');
+      };
+      HTMLMediaElement.prototype.play = rejectAudio;
+      window.AudioContext = new Proxy(window.AudioContext, { construct: rejectAudio });
+    });
+    const errors: string[] = [];
+    page.on('pageerror', (error) => errors.push(error.message));
+    const result = acceptedResult(catalog);
+    await page.route('**/api/run', (route) => route.fulfill({ json: result }));
+    await page.goto(`/#${problemId}`);
+    const area = page.locator('.editor-area');
+    const editor = area.getByRole('textbox');
+    const effect = area.locator(celebration);
+    await expect(page.getByRole('button', { name: 'Submit', exact: true })).toBeEnabled();
+    await expect(page.locator(celebration)).toHaveCount(0);
+
+    // The second success must celebrate even though the first already solved this problem.
+    for (const _submission of [1, 2]) {
+      await editor.focus();
+      await page.keyboard.press('ControlOrMeta+Shift+Enter');
+      await expect(page.getByText('Accepted', { exact: true })).toBeVisible();
+      await expect(effect).toBeVisible();
+      await expect(effect).toHaveAttribute('aria-hidden', 'true');
+      await expect(effect).toHaveCSS('pointer-events', 'none');
+      await expect(effect).toHaveCSS('position', 'absolute');
+      await expect(
+        effect.locator('button, a, input, select, textarea, [tabindex], [contenteditable=true]'),
+      ).toHaveCount(0);
+      expect(await effect.locator('.submission-confetti').count()).toBeGreaterThan(0);
+      const during = await area.boundingBox();
+      await expect(effect).toHaveCount(0, { timeout: 3_000 });
+      const after = await area.boundingBox();
+      expect(during).not.toBeNull();
+      expect(after).not.toBeNull();
+      for (const dimension of ['x', 'y', 'width', 'height'] as const)
+        expect(Math.abs(after![dimension] - during![dimension])).toBeLessThanOrEqual(0.5);
+      await expect(page.locator('.app')).toHaveAttribute('data-save-state', 'saved');
+    }
+    await expect(page.locator('audio, video')).toHaveCount(0);
+    expect(await page.locator('html').getAttribute('data-unexpected-audio')).toBeNull();
+    expect(errors).toEqual([]);
+
+    // Rehydrating accepted history is not a new accepted submission.
+    await page.reload();
+    await expect(page.getByRole('button', { name: 'Submit', exact: true })).toBeEnabled();
+    await page.getByRole('tab', { name: /^Submissions/ }).click();
+    await expect(page.getByText('Accepted', { exact: true })).toHaveCount(2);
+    await expect(page.locator(celebration)).toHaveCount(0);
+    await page.locator('.submission-row').first().click();
+    await expect(page.getByRole('dialog')).toBeVisible();
+    await expect(page.locator(celebration)).toHaveCount(0);
+  });
+
+  test('reduced motion keeps a static success check and hides confetti', async ({
+    page,
+    catalog,
+  }) => {
+    await page.emulateMedia({ reducedMotion: 'reduce' });
+    await page.route('**/api/run', (route) => route.fulfill({ json: acceptedResult(catalog) }));
+    await page.goto(`/#${problemId}`);
+    await page.getByRole('button', { name: 'Submit', exact: true }).click();
+    const effect = page.locator('.editor-area').locator(celebration);
+    await expect(effect).toBeVisible();
+    await expect(effect.locator('.submission-celebration-check')).toBeVisible();
+    await expect(effect.locator('.submission-celebration-check')).toHaveCSS(
+      'animation-name',
+      'none',
+    );
+    await expect(effect).toHaveCSS('animation-name', 'none');
+    for (const particle of await effect.locator('.submission-confetti').all())
+      await expect(particle).toBeHidden();
+    await expect(effect).toHaveCount(0, { timeout: 3_000 });
+    await expect(page.getByText('Accepted', { exact: true })).toBeVisible();
+  });
+
+  test('examples, custom runs, partial suites, failures, and execution errors do not celebrate', async ({
+    page,
+    catalog,
+  }) => {
+    const accepted = acceptedResult(catalog);
+    let result = { ...accepted, cases: accepted.cases.slice(0, 1) };
+    await page.route('**/api/run', (route) => route.fulfill({ json: result }));
+    await page.goto(`/#${problemId}`);
+    await page.getByRole('button', { name: 'Run example', exact: true }).click();
+    await expect(page.getByText('Example passed', { exact: true })).toBeVisible();
+    await expect(page.locator(celebration)).toHaveCount(0);
+    await page.getByRole('tab', { name: 'Custom input', exact: true }).click();
+    await page.getByLabel('Function arguments', { exact: true }).fill("('  Mixed  ',)");
+    // Even bogus grading fields in a custom response must remain non-celebratory.
+    result = accepted;
+    await page.getByRole('button', { name: 'Run input', exact: true }).click();
+    await expect(page.getByText('Custom run', { exact: true })).toBeVisible();
+    await expect(page.locator(celebration)).toHaveCount(0);
+
+    for (const response of [
+      { ...accepted, cases: accepted.cases.slice(0, 1) },
+      { ...accepted, cases: accepted.cases.map((item) => ({ ...item, passed: false })) },
+      { ...accepted, error: 'The isolated runner is unavailable.' },
+    ]) {
+      result = response;
+      await Promise.all([
+        page.waitForResponse((reply) => reply.url().endsWith('/api/run')),
+        page.getByRole('button', { name: 'Submit', exact: true }).click(),
+      ]);
+      await expect(page.getByRole('button', { name: 'Submit', exact: true })).toBeEnabled();
+      if (response.error)
+        await expect(page.getByRole('alert').filter({ hasText: 'Run stopped' })).toBeVisible();
+      else {
+        await expect(page.locator('.case-tabs > button')).toHaveCount(response.cases.length);
+        // Partial-result wording is an existing grading contract, separate from celebration.
+        if (response.cases.length === accepted.cases.length)
+          await expect(page.getByText('Not quite yet', { exact: true })).toBeVisible();
+      }
+      await expect(page.locator(celebration)).toHaveCount(0);
+    }
+  });
+
+  for (const action of ['cancel', 'navigate'] as const) {
+    test(`a late accepted response after ${action} does not celebrate`, async ({
+      page,
+      catalog,
+    }) => {
+      const result = acceptedResult(catalog);
+      let release!: () => void;
+      let completed = false;
+      const held = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      await page.route('**/api/run', async (route) => {
+        await held;
+        // Aborting fetch may invalidate the intercepted request before this late reply.
+        await route.fulfill({ json: result }).catch(() => {});
+        completed = true;
+      });
+      await page.goto(`/#${problemId}`);
+      await Promise.all([
+        page.waitForRequest((request) => request.url().endsWith('/api/run')),
+        page.getByRole('button', { name: 'Submit', exact: true }).click(),
+      ]);
+      await expect(page.getByRole('button', { name: 'Stop', exact: true })).toBeVisible();
+      if (action === 'cancel') {
+        await page.getByRole('button', { name: 'Stop', exact: true }).click();
+        await expect(page.getByRole('alert').filter({ hasText: 'Run canceled' })).toBeVisible();
+      } else {
+        await page.getByRole('link', { name: 'Code Practice library', exact: true }).click();
+        await expect(page.getByRole('main', { name: 'Practice library' })).toBeVisible();
+      }
+      release();
+      await expect.poll(() => completed).toBe(true);
+      await expect(page.locator(celebration)).toHaveCount(0);
+      await expect(page.getByText('Accepted', { exact: true })).toHaveCount(0);
+    });
+  }
+});
 
 test.describe('Library presentation', () => {
   const problemId = 'python-core-normalize-text-01';
@@ -252,6 +434,7 @@ test.describe('Execution results', () => {
       await expect(outputBox).toHaveCSS('background-color', 'rgb(32, 32, 32)');
       await expect(outputBox).toHaveCSS('font-size', '16px');
       await expect(outputBox).toHaveCSS('line-height', '24px');
+      await expect(outputBox).toHaveCSS('border-left-width', '3px');
     }
     const layout = await detail.evaluate((element) => {
       const bounds = element.getBoundingClientRect();
