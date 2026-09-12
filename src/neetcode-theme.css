@@ -138,6 +138,7 @@ textarea {
   overflow: hidden;
 }
 .ide-view .workspace-grid {
+  position: relative;
   grid-template-columns: minmax(0, 44fr) minmax(0, 56fr);
   gap: 8px;
   min-height: 0;
@@ -371,7 +372,8 @@ textarea {
   box-shadow: none;
 }
 /* A one-shot accepted-submit celebration; never changes layout or captures input. */
-.submission-celebration {
+.submission-celebration,
+.submission-confetti-bursts {
   position: absolute;
   inset: 0;
   z-index: 5;
@@ -394,7 +396,7 @@ textarea {
 }
 .submission-confetti {
   position: absolute;
-  top: 28%;
+  top: 20%;
   width: 6px;
   height: 6px;
   border-radius: 50%;

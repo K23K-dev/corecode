@@ -6,7 +6,7 @@ const removedEditorMetadata = '.save-status, .editor-auto, .editor-filebar';
 
 test.describe('Fresh submission celebration', () => {
   const problemId = 'python-core-normalize-text-01';
-  const celebration = '.submission-celebration';
+  const celebration = '.submission-celebration, .submission-confetti-bursts';
 
   function acceptedResult(catalog: TestCatalog): RunResult {
     const exercise = catalog.exercises.find((item) => item.id === problemId)!;
@@ -41,9 +41,11 @@ test.describe('Fresh submission celebration', () => {
     const result = acceptedResult(catalog);
     await page.route('**/api/run', (route) => route.fulfill({ json: result }));
     await page.goto(`/#${problemId}`);
+    const workspace = page.locator('.workspace-grid');
     const area = page.locator('.editor-area');
     const editor = area.getByRole('textbox');
-    const effect = area.locator(celebration);
+    const effect = area.locator('.submission-celebration');
+    const bursts = workspace.locator(':scope > .submission-confetti-bursts');
     await expect(page.getByRole('button', { name: 'Submit', exact: true })).toBeEnabled();
     await expect(page.locator(celebration)).toHaveCount(0);
 
@@ -52,21 +54,60 @@ test.describe('Fresh submission celebration', () => {
       await editor.focus();
       await page.keyboard.press('ControlOrMeta+Shift+Enter');
       await expect(page.getByText('Accepted', { exact: true })).toBeVisible();
-      await expect(effect).toBeVisible();
-      await expect(effect).toHaveAttribute('aria-hidden', 'true');
-      await expect(effect).toHaveCSS('pointer-events', 'none');
-      await expect(effect).toHaveCSS('position', 'absolute');
-      await expect(
-        effect.locator('button, a, input, select, textarea, [tabindex], [contenteditable=true]'),
-      ).toHaveCount(0);
-      expect(await effect.locator('.submission-confetti').count()).toBeGreaterThan(0);
+      for (const overlay of [effect, bursts]) {
+        await expect(overlay).toBeVisible();
+        await expect(overlay).toHaveAttribute('aria-hidden', 'true');
+        await expect(overlay).toHaveCSS('pointer-events', 'none');
+        await expect(overlay).toHaveCSS('position', 'absolute');
+        await expect(
+          overlay.locator('button, a, input, select, textarea, [tabindex], [contenteditable=true]'),
+        ).toHaveCount(0);
+      }
+      await expect(area.locator('.submission-confetti')).toHaveCount(0);
+      const origins = await bursts.evaluate((overlay) => {
+        const bounds = overlay.getBoundingClientRect();
+        const particles = [...overlay.querySelectorAll('.submission-confetti')];
+        return {
+          x: bounds.x,
+          y: bounds.y,
+          width: bounds.width,
+          height: bounds.height,
+          // Read CSS origins, not the animated transforms of moving particles.
+          left: [
+            ...new Set(
+              particles.map((particle) =>
+                Math.round((parseFloat(getComputedStyle(particle).left) / bounds.width) * 100),
+              ),
+            ),
+          ].sort((left, right) => left - right),
+          top: [
+            ...new Set(
+              particles.map((particle) =>
+                Math.round((parseFloat(getComputedStyle(particle).top) / bounds.height) * 100),
+              ),
+            ),
+          ],
+        };
+      });
+      expect(origins.left).toEqual([10, 90]);
+      expect(origins.top).toEqual([20]);
+      const workspaceDuring = await workspace.boundingBox();
       const during = await area.boundingBox();
-      await expect(effect).toHaveCount(0, { timeout: 3_000 });
+      expect(workspaceDuring).not.toBeNull();
+      for (const dimension of ['x', 'y', 'width', 'height'] as const)
+        expect(Math.abs(origins[dimension] - workspaceDuring![dimension])).toBeLessThanOrEqual(0.5);
+      await expect(page.locator(celebration)).toHaveCount(0, { timeout: 3_000 });
+      const workspaceAfter = await workspace.boundingBox();
       const after = await area.boundingBox();
       expect(during).not.toBeNull();
       expect(after).not.toBeNull();
-      for (const dimension of ['x', 'y', 'width', 'height'] as const)
+      expect(workspaceAfter).not.toBeNull();
+      for (const dimension of ['x', 'y', 'width', 'height'] as const) {
         expect(Math.abs(after![dimension] - during![dimension])).toBeLessThanOrEqual(0.5);
+        expect(
+          Math.abs(workspaceAfter![dimension] - workspaceDuring![dimension]),
+        ).toBeLessThanOrEqual(0.5);
+      }
       await expect(page.locator('.app')).toHaveAttribute('data-save-state', 'saved');
     }
     await expect(page.locator('audio, video')).toHaveCount(0);
@@ -92,7 +133,8 @@ test.describe('Fresh submission celebration', () => {
     await page.route('**/api/run', (route) => route.fulfill({ json: acceptedResult(catalog) }));
     await page.goto(`/#${problemId}`);
     await page.getByRole('button', { name: 'Submit', exact: true }).click();
-    const effect = page.locator('.editor-area').locator(celebration);
+    const effect = page.locator('.editor-area .submission-celebration');
+    const bursts = page.locator('.workspace-grid > .submission-confetti-bursts');
     await expect(effect).toBeVisible();
     await expect(effect.locator('.submission-celebration-check')).toBeVisible();
     await expect(effect.locator('.submission-celebration-check')).toHaveCSS(
@@ -100,9 +142,10 @@ test.describe('Fresh submission celebration', () => {
       'none',
     );
     await expect(effect).toHaveCSS('animation-name', 'none');
-    for (const particle of await effect.locator('.submission-confetti').all())
+    expect(await bursts.locator('.submission-confetti').count()).toBeGreaterThan(0);
+    for (const particle of await bursts.locator('.submission-confetti').all())
       await expect(particle).toBeHidden();
-    await expect(effect).toHaveCount(0, { timeout: 3_000 });
+    await expect(page.locator(celebration)).toHaveCount(0, { timeout: 3_000 });
     await expect(page.getByText('Accepted', { exact: true })).toBeVisible();
   });
 

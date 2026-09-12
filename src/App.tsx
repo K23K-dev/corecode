@@ -26,7 +26,11 @@ import Modal from './components/Modal';
 import ProgressModal from './components/ProgressModal';
 import PracticeLibrary from './components/PracticeLibrary';
 import ProblemPanel, { type ProblemTab } from './components/ProblemPanel';
-import Results, { SubmissionCelebration, type Execution } from './components/Results';
+import Results, {
+  SubmissionCelebration,
+  SubmissionConfetti,
+  type Execution,
+} from './components/Results';
 import type { Exercise } from './lib/exercises';
 import {
   MAX_ATTEMPTS_PER_EXERCISE,
@@ -463,6 +467,7 @@ function WorkspaceApp({ catalog, client }: { catalog: Catalog; client: ProgressC
               </button>
             </div>
             <div className={'workspace-grid mobile-' + mobilePane}>
+              {celebration !== null && <SubmissionConfetti key={celebration} />}
               <ProblemPanel
                 exercise={exercise}
                 solved={Boolean(data.exercises[exercise.id]?.solved)}

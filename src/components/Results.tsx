@@ -13,7 +13,7 @@ const confettiColors = ['#22c55e', '#559bf8', '#d65fa6', '#f2b84b', '#a482ed'];
 const confetti = Array.from({ length: 28 }, (_, index) => {
   const angle = ((index % 14) / 13) * Math.PI;
   return {
-    left: index < 14 ? '15%' : '85%',
+    left: index < 14 ? '10%' : '90%',
     '--confetti-x': `${Math.round(Math.cos(angle) * 95)}px`,
     '--confetti-rise': `${Math.round(-30 - Math.sin(angle) * 65)}px`,
     '--confetti-fall': `${100 + (index % 5) * 18}px`,
@@ -23,12 +23,19 @@ const confetti = Array.from({ length: 28 }, (_, index) => {
 });
 
 /** Decorative only; the results heading already announces an accepted submission. */
-export function SubmissionCelebration() {
+export function SubmissionConfetti() {
   return (
-    <div className="submission-celebration" aria-hidden="true">
+    <div className="submission-confetti-bursts" aria-hidden="true">
       {confetti.map((style, index) => (
         <span className="submission-confetti" key={index} style={style} />
       ))}
+    </div>
+  );
+}
+
+export function SubmissionCelebration() {
+  return (
+    <div className="submission-celebration" aria-hidden="true">
       <span className="submission-celebration-check">
         <Check size={56} strokeWidth={3.5} />
       </span>
