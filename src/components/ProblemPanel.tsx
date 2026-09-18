@@ -1,6 +1,7 @@
 import type { KeyboardEvent } from 'react';
 import { Check, ChevronRight, Code2, FileCode2, History, X } from 'lucide-react';
 import CodeEditor from './CodeEditor';
+import FrontendPreview from './FrontendPreview';
 import type { Exercise } from '../lib/exercises';
 import type { Attempt } from '../lib/progress';
 
@@ -111,27 +112,31 @@ function Question({ exercise, solved }: { exercise: Exercise; solved: boolean })
         )}
       </div>
       <p className="problem-prompt">{exercise.prompt}</p>
-      {exercise.examples?.map((example, index) => (
-        <div className="example" data-runtime={exercise.runtime} key={index}>
-          <h2>Example {index + 1}:</h2>
-          <div
-            className={
-              example.inputLabel || example.outputLabel
-                ? 'example-code example-scenario'
-                : 'example-code'
-            }
-          >
-            <div>
-              <span>{example.inputLabel ?? 'Input'}:</span>
-              <pre>{example.input}</pre>
-            </div>
-            <div>
-              <span>{example.outputLabel ?? 'Output'}:</span>
-              <pre>{example.output}</pre>
+      {exercise.preview && (
+        <FrontendPreview key={`${exercise.id}:${exercise.version}`} exercise={exercise} />
+      )}
+      {!exercise.preview &&
+        exercise.examples?.map((example, index) => (
+          <div className="example" data-runtime={exercise.runtime} key={index}>
+            <h2>Example {index + 1}:</h2>
+            <div
+              className={
+                example.inputLabel || example.outputLabel
+                  ? 'example-code example-scenario'
+                  : 'example-code'
+              }
+            >
+              <div>
+                <span>{example.inputLabel ?? 'Input'}:</span>
+                <pre>{example.input}</pre>
+              </div>
+              <div>
+                <span>{example.outputLabel ?? 'Output'}:</span>
+                <pre>{example.output}</pre>
+              </div>
             </div>
           </div>
-        </div>
-      ))}
+        ))}
       {!!exercise.requirements?.length && (
         <div className="requirements">
           <h2>Requirements:</h2>

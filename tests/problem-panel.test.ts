@@ -127,6 +127,39 @@ describe('ProblemPanel', () => {
     expect(html).not.toContain('topic-pill');
   });
 
+  it('replaces vague frontend examples with the authored target preview and its requirements', () => {
+    const html = renderPanel({
+      ...panelProps(),
+      exercise: {
+        ...exercise,
+        runtime: 'javascript',
+        language: 'CSS',
+        preview: { caption: 'Resize the preview to compare the layout.', widths: [1000, 700, 450] },
+        examples: [{ input: 'Rendered product markup', output: 'A rendered card.' }],
+      },
+    });
+
+    expect(html).toContain('aria-label="Target preview"');
+    expect(html).toContain('aria-label="Preview width"');
+    expect(html).toContain('1000px');
+    expect(html).toContain('450px');
+    expect(html).toContain('aria-label="Reset target preview"');
+    expect(html).toContain('Resize the preview to compare the layout.');
+    expect(html).toContain('Preserve interior spaces.');
+    expect(html).not.toContain('Rendered product markup');
+    expect(html).not.toContain('Example 1:');
+    expect(html).not.toContain('reference source only');
+  });
+
+  it('keeps input/output examples for JavaScript functions without a visual target', () => {
+    const html = renderPanel({
+      ...panelProps(),
+      exercise: { ...exercise, runtime: 'javascript', language: 'JavaScript' },
+    });
+    expect(html).toContain('<span>Input:</span>');
+    expect(html).not.toContain('aria-label="Target preview"');
+  });
+
   it('shows authored scenario labels and concrete file states without empty requirements', () => {
     const html = renderPanel({
       ...panelProps(),

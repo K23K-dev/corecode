@@ -23,6 +23,14 @@ export interface Exercise {
   example?: string;
   topic?: string;
   requirements?: string[];
+  preview?: {
+    caption: string;
+    html?: string;
+    css?: string;
+    setup?: string;
+    widths?: number[];
+    assets?: Record<string, string>;
+  };
   examples?: {
     input: string;
     output: string;

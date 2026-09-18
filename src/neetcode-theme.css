@@ -333,6 +333,76 @@ textarea {
   overflow-x: auto;
   white-space: pre;
 }
+.frontend-preview {
+  margin-top: 26px;
+}
+.frontend-preview-toolbar,
+.frontend-preview-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.frontend-preview-toolbar {
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.frontend-preview-toolbar h2 {
+  margin: 0;
+}
+.frontend-preview-controls .button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 400;
+}
+.frontend-preview-controls select {
+  padding: 5px 8px;
+  border-radius: 4px;
+  font: 12px var(--body-font);
+}
+.frontend-preview-scale {
+  color: var(--muted);
+  font-size: 12px;
+}
+.frontend-preview-stage {
+  padding: 18px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  color: #171717;
+}
+.frontend-preview-viewport {
+  position: relative;
+  max-width: 100%;
+  margin-inline: auto;
+}
+.frontend-preview-viewport iframe {
+  position: absolute;
+  inset: 0 auto auto 0;
+  display: block;
+  border: 0;
+  transform-origin: top left;
+  color-scheme: light;
+}
+.frontend-preview-status {
+  padding: 20px 0;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.frontend-preview-status .button {
+  margin-top: 12px;
+}
+.frontend-preview-caption {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
 .reference-code {
   margin-top: 16px;
 }

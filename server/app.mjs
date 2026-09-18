@@ -2,16 +2,19 @@ import {
   readActivity,
   readCatalog,
   readExecutionProblem,
+  readPreviewProblem,
   readState,
   repairActivity,
   writeState,
 } from './repository.mjs';
 import { errorResponse, jsonBody, jsonResponse, protectRequest } from './http.mjs';
 import { RequestError } from './validation.mjs';
+import { createPreviewDocument } from './frontend-preview.mjs';
 
 const METHODS = {
   '/api/health': ['GET'],
   '/api/catalog': ['GET'],
+  '/api/preview': ['GET'],
   '/api/state': ['GET', 'PUT'],
   '/api/activity': ['GET'],
   '/api/activity/repairs': ['POST'],
@@ -52,6 +55,17 @@ export function createApp({
         case '/api/catalog':
           result = await readCatalog(database);
           break;
+        case '/api/preview': {
+          const params = new URL(request.url).searchParams;
+          const problem = await readPreviewProblem(
+            database,
+            params.get('problemId'),
+            params.get('problemVersion'),
+          );
+          request.signal.throwIfAborted();
+          result = { document: await createPreviewDocument(problem) };
+          break;
+        }
         case '/api/state':
           result =
             request.method === 'GET' ? await readState(database) : await writeState(database, body);

@@ -171,6 +171,30 @@ export async function readCatalog(pool) {
   return { ...row, version: digest(row) };
 }
 
+/** Public rendering content only: preview requests never read private grading specifications. */
+export async function readPreviewProblem(pool, problemId, problemVersion) {
+  const id = identifier(problemId, 'Problem ID');
+  const version = identifier(problemVersion, 'Problem version');
+  const {
+    rows: [row],
+  } = await pool.query(
+    `SELECT p.current_version AS version, v.content
+     FROM cp_problems p
+     JOIN cp_problem_versions v ON v.exercise_id = p.id AND v.version = p.current_version
+     WHERE p.id = $1 AND p.active`,
+    [id],
+  );
+  if (!row) throw new RequestError('Problem not found.', 404, 'not_found');
+  if (row.version !== version) {
+    throw new RequestError(
+      'This problem has changed. Refresh it to see the rendered example.',
+      409,
+      'problem_changed',
+    );
+  }
+  return { ...row.content, id, version: row.version };
+}
+
 /** Private execution lookup. Never include this result in public catalog/state routes. */
 export async function readExecutionProblem(pool, problemId) {
   const id = identifier(problemId, 'Problem ID');
