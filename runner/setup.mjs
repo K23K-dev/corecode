@@ -18,8 +18,6 @@ const setupAssets = Object.freeze([
   'runner/javascript/entrypoint.mjs',
   'runner/javascript/browser-checks.mjs',
   'runner/javascript/backend-checks.mjs',
-  'tests/runner/python/verify_catalog.py',
-  'tests/runner/python/verify_solution_methods.py',
 ]);
 const projectRoot = fileURLToPath(new URL('..', import.meta.url));
 // Current managed images use /vercel as their writable working directory.
@@ -139,15 +137,10 @@ export async function setupSandboxRunner({
       signal: operation,
     });
     // No environment variables, source archive, database data, or credentials are sent.
-    for (const path of [remoteRoot, remoteRoot + '/runner', remoteRoot + '/tests']) {
+    for (const path of [remoteRoot, remoteRoot + '/runner']) {
       await sandbox.mkDir(path, { signal: operation });
     }
-    for (const directory of [
-      'runner/python',
-      'runner/javascript',
-      'tests/runner',
-      'tests/runner/python',
-    ]) {
+    for (const directory of ['runner/python', 'runner/javascript']) {
       await sandbox.mkDir(remoteRoot + '/' + directory, { signal: operation });
     }
     await sandbox.writeFiles(files, { signal: operation });

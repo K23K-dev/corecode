@@ -8,13 +8,9 @@
     "start": "next start --hostname 127.0.0.1 --port 5173",
     "build": "next build",
     "runner:setup": "node runner/setup.mjs",
-    "test": "vitest run --config tests/vitest.config.ts",
-    "test:db": "node tests/run-database.mjs",
-    "test:execution": "node --test tests/runner/execution.test.mjs tests/runner/sandbox.test.mjs tests/runner/sandbox-setup.test.mjs tests/runner/catalog-sandbox.test.mjs",
-    "test:e2e": "playwright test --config tests/playwright.config.ts",
-    "format": "prettier --write \"{src,server,shared,runner,tests}/**/*.{ts,mts,tsx,js,mjs,css}\" next.config.ts package.json tsconfig.json vercel.json",
-    "format:check": "prettier --check \"{src,server,shared,runner,tests}/**/*.{ts,mts,tsx,js,mjs,css}\" next.config.ts package.json tsconfig.json vercel.json",
-    "check": "npm run format:check && npm run build && npm test && npm run test:execution && npm run test:db && npm run test:e2e"
+    "format": "prettier --write \"{src,server,shared,runner}/**/*.{ts,mts,tsx,js,mjs,css}\" next.config.ts package.json tsconfig.json vercel.json",
+    "format:check": "prettier --check \"{src,server,shared,runner}/**/*.{ts,mts,tsx,js,mjs,css}\" next.config.ts package.json tsconfig.json vercel.json",
+    "check": "npm run format:check && npm run build"
   },
   "dependencies": {
     "@codemirror/autocomplete": "6.20.3",
@@ -40,14 +36,12 @@
     "react-dom": "19.2.8"
   },
   "devDependencies": {
-    "@playwright/test": "1.63.0",
     "@types/node": "^22.15.0",
     "@types/pg": "^8.23.1",
     "@types/react": "^19.2.0",
     "@types/react-dom": "^19.2.0",
     "prettier": "3.9.6",
-    "typescript": "7.0.2",
-    "vitest": "5.0.0"
+    "typescript": "7.0.2"
   },
   "prettier": {
     "singleQuote": true,

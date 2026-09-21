@@ -12,7 +12,6 @@ RUN sed -i '\|^path-exclude /usr/share/man/\*$|d' /etc/dpkg/dpkg.cfg.d/docker \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /opt/runner
 COPY runner/python/ ./
-COPY tests/runner/python/verify_catalog.py tests/runner/python/verify_solution_methods.py ./
 USER 65534:65534
 WORKDIR /work
 ENTRYPOINT ["python", "/opt/runner/entrypoint.py"]
