@@ -16,6 +16,12 @@ npm run dev
 Open [localhost:5173](http://127.0.0.1:5173). For a built version, run
 `npm run build` followed by `npm start`.
 
+The Go judge is being built separately; website grading still uses the existing
+runner. With Go 1.27+ installed, run `npm run judge:dev` in another terminal.
+It reads `.env` and reports dependency health on `127.0.0.1:50051`.
+Use `npm run judge:check` to format-check, vet, and build it. Regenerating bindings
+with `npm run judge:generate` also requires protoc 36.2.
+
 ## Vercel
 
 Use the **Next.js** framework preset with default build/output settings.
