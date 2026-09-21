@@ -19,7 +19,7 @@ Open [localhost:5173](http://127.0.0.1:5173). For a built version, run
 The Go judge is being built separately; website grading still uses the existing
 runner. With Go 1.27+ installed, run `npm run judge:dev` in another terminal.
 It reads `.env` and exposes runs and durable submissions on `127.0.0.1:50051`.
-Job results are stored separately; website progress integration comes next.
+Submissions save history and progress together; website integration comes next.
 Use `npm run judge:check` to format-check, vet, and build it. Regenerating bindings
 with `npm run judge:generate` also requires protoc 36.2.
 

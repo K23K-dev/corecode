@@ -115,7 +115,7 @@ export function validateStateUpdate(value) {
   fields(
     root,
     ['expectedRevision', 'progress', 'stars'],
-    ['migrationId', 'writeIds'],
+    ['migrationId', 'writeIds', 'solvedChanges'],
     'Save request',
   );
   const expectedRevision = nonnegativeInteger(root.expectedRevision, 'Expected revision');
@@ -159,7 +159,35 @@ export function validateStateUpdate(value) {
   if (root.writeIds !== undefined && (!Array.isArray(root.writeIds) || root.writeIds.length > 1000))
     fail('Write IDs must contain at most 1,000 identifiers.');
   const writeIds = [...new Set((root.writeIds ?? []).map((id) => identifier(id, 'Write ID')))];
-  return { expectedRevision, progress: visible, stars, submissions, migrationId, writeIds };
+  const solvedChanges = Object.create(null);
+  const choiceIds = new Set();
+  for (const [rawId, rawChange] of Object.entries(
+    plainObject(root.solvedChanges ?? {}, 'Completion changes'),
+  )) {
+    const exerciseId = identifier(rawId, 'Exercise ID');
+    const change = plainObject(rawChange, 'Completion change');
+    fields(change, ['id', 'value'], [], 'Completion change');
+    const id = identifier(change.id, 'Completion change ID');
+    if (
+      typeof change.value !== 'boolean' ||
+      !visible.exercises[exerciseId] ||
+      visible.exercises[exerciseId].solved !== change.value ||
+      !writeIds.includes(id) ||
+      choiceIds.has(id)
+    )
+      fail('Completion changes must match progress and have unique write IDs.');
+    choiceIds.add(id);
+    solvedChanges[exerciseId] = { id, value: change.value };
+  }
+  return {
+    expectedRevision,
+    progress: visible,
+    stars,
+    submissions,
+    migrationId,
+    writeIds,
+    solvedChanges,
+  };
 }
 
 export function stableJson(value) {

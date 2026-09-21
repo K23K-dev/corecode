@@ -326,6 +326,7 @@ export class ProgressClient {
     selected: string[],
     migrationId?: string,
     writeIds: string[] = [],
+    solvedChanges: Record<string, Pick<SolvedChange, 'id' | 'value'>> = {},
   ) {
     return jsonRequest(this.fetcher, '/api/state', {
       method: 'PUT',
@@ -335,6 +336,7 @@ export class ProgressClient {
         progress,
         stars: selected,
         writeIds,
+        solvedChanges,
         ...(migrationId ? { migrationId } : {}),
       }),
     });
@@ -682,6 +684,14 @@ export class ProgressClient {
           receiptBatch.length ? this.base.stars : applyStars(this.base.stars, sent.stars),
           undefined,
           receiptBatch.length ? receiptBatch : writeIds,
+          receiptBatch.length
+            ? {}
+            : Object.fromEntries(
+                Object.entries(sent.solved).map(([id, change]) => [
+                  id,
+                  { id: change.id, value: change.value },
+                ]),
+              ),
         );
         if (response.status === 409 && (body as { code?: string }).code === 'revision_conflict') {
           this.base = parseState(body);

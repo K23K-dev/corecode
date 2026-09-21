@@ -38,6 +38,9 @@ type claimedJob struct {
 const jobColumns = `id::text, problem_id, problem_version, state, created_at,
 	started_at, finished_at, result, error, revision, request_fingerprint`
 
+const queueSchemaReady = `to_regprocedure('cp_finish_execution(uuid,uuid,jsonb,text,boolean)') IS NOT NULL
+	AND EXISTS (SELECT 1 FROM cp_schema_migrations WHERE version = 7)`
+
 func submissionFingerprint(request *judgev1.SubmitRequest) string {
 	data, _ := json.Marshal(struct {
 		ProblemID, ProblemVersion, Code string
@@ -147,8 +150,9 @@ func (s *jobStore) accept(ctx context.Context, request *judgev1.SubmitRequest, s
 		return nil, status.Error(codes.FailedPrecondition, "This problem changed. Refresh before submitting.")
 	}
 	job, err := scanJob(tx.QueryRow(ctx, `INSERT INTO cp_execution_jobs
-		(id, problem_id, problem_version, spec_version, code, runtime, image_id, completion_intent_ids, request_fingerprint)
-		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9 FROM cp_grading_specs
+		(id, problem_id, problem_version, spec_version, code, runtime, image_id, completion_intent_ids, request_fingerprint, completion_choice_id)
+		SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9,
+			(SELECT completion_choices->>$2 FROM cp_state WHERE profile_id = 1) FROM cp_grading_specs
 		WHERE exercise_id = $2 AND problem_version = $3 AND spec_version = $4 AND content->>'runtime' = $6
 		RETURNING `+jobColumns, request.SubmissionId, request.ProblemId, request.ProblemVersion,
 		specVersion, request.Code, runtime, imageID, sortedIntentIDs(request.CompletionIntentIds), fingerprint))
@@ -236,7 +240,7 @@ func (s *jobStore) claim(ctx context.Context, ownerToken, newContainerName strin
 	// then clean recorded attempts before admitting fresh queued work.
 	err := s.pool.QueryRow(ctx, `WITH next AS MATERIALIZED (
 		SELECT id, state <> 'queued' AS recovery FROM cp_execution_jobs
-		WHERE id <> ALL($3::uuid[]) AND
+		WHERE `+queueSchemaReady+` AND id <> ALL($3::uuid[]) AND
 			(state = 'queued' OR (state IN ('running', 'canceling') AND lease_until <= clock_timestamp()))
 			AND NOT EXISTS (SELECT 1 FROM cp_execution_jobs
 				WHERE state IN ('running', 'canceling') AND id <> ALL($3::uuid[]) AND lease_until > clock_timestamp())
@@ -281,16 +285,9 @@ func (s *jobStore) finish(ctx context.Context, id, token string, result *judgev1
 			return nil, status.Error(codes.Internal, "Unable to save the grading result.")
 		}
 	}
-	job, err := scanJob(s.pool.QueryRow(ctx, `UPDATE cp_execution_jobs SET
-		state = CASE WHEN cancel_requested THEN 'canceled'
-			WHEN $3::jsonb IS NOT NULL THEN 'completed' WHEN $5 AND attempts < 2 THEN 'queued' ELSE 'failed' END,
-		result = CASE WHEN cancel_requested THEN NULL ELSE $3::jsonb END,
-		error = CASE WHEN cancel_requested OR $3::jsonb IS NOT NULL OR ($5 AND attempts < 2) THEN NULL ELSE $4 END,
-		finished_at = CASE WHEN NOT cancel_requested AND $3::jsonb IS NULL AND $5 AND attempts < 2
-			THEN NULL ELSE clock_timestamp() END,
-		owner_token = NULL, lease_until = NULL, container_name = NULL, revision = revision + 1
-		WHERE id = $1 AND owner_token = $2 AND lease_until > clock_timestamp() AND state IN ('running', 'canceling')
-		RETURNING `+jobColumns, id, token, encoded, failure, retry))
+	job, err := scanJob(s.pool.QueryRow(ctx, `SELECT `+jobColumns+
+		` FROM cp_finish_execution($1::uuid, $2::uuid, $3::jsonb, $4::text, $5::boolean)`,
+		id, token, encoded, failure, retry))
 	if err != nil {
 		return nil, jobDatabaseError(ctx, err)
 	}

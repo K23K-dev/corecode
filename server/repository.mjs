@@ -162,6 +162,179 @@ const MIGRATION_SQL = `
   CREATE INDEX IF NOT EXISTS cp_execution_jobs_problem_idx
     ON cp_execution_jobs(problem_id, created_at DESC, id DESC);
   INSERT INTO cp_schema_migrations(version) VALUES(6) ON CONFLICT DO NOTHING;
+  ALTER TABLE cp_state ADD COLUMN IF NOT EXISTS completion_choices jsonb NOT NULL DEFAULT '{}';
+  ALTER TABLE cp_execution_jobs ADD COLUMN IF NOT EXISTS completion_choice_id text;
+  ALTER TABLE cp_submissions ADD COLUMN IF NOT EXISTS execution_job_id uuid UNIQUE
+    REFERENCES cp_execution_jobs(id);
+  ALTER TABLE cp_submissions DROP CONSTRAINT IF EXISTS cp_submissions_grading_source_check;
+  ALTER TABLE cp_submissions ADD CONSTRAINT cp_submissions_grading_source_check CHECK (
+    grading_source IN ('browser', 'runner') AND
+    (grading_source = 'runner') = (execution_job_id IS NOT NULL)
+  );
+
+  CREATE OR REPLACE FUNCTION cp_protect_runner_submission() RETURNS trigger LANGUAGE plpgsql AS $$
+  BEGIN
+    IF NEW.grading_source = 'browser' AND NEW.id LIKE 'judge:%' AND NOT EXISTS (
+      SELECT 1 FROM cp_submissions saved WHERE saved.id = NEW.id
+        AND saved.exercise_id = NEW.exercise_id AND saved.attempt = NEW.attempt
+    ) THEN
+      RAISE EXCEPTION 'Judge submission IDs are reserved for canonical history'
+        USING ERRCODE = '23514', CONSTRAINT = 'cp_runner_submission_reserved';
+    END IF;
+    IF NEW.grading_source = 'runner' AND NOT EXISTS (
+      SELECT 1 FROM cp_execution_jobs job WHERE job.id = NEW.execution_job_id
+        AND NEW.id = 'judge:' || job.id::text AND job.state = 'completed' AND job.result IS NOT NULL
+        AND NEW.exercise_id = job.problem_id AND NEW.problem_version = job.problem_version
+        AND NEW.attempt->>'code' = job.code AND NEW.attempt->>'problemVersion' = job.problem_version
+    ) THEN
+      RAISE EXCEPTION 'Judge history must refer to its completed execution'
+        USING ERRCODE = '23514', CONSTRAINT = 'cp_runner_submission_reserved';
+    END IF;
+    RETURN NEW;
+  END;
+  $$;
+  CREATE OR REPLACE TRIGGER cp_submissions_runner_guard BEFORE INSERT ON cp_submissions
+    FOR EACH ROW EXECUTE FUNCTION cp_protect_runner_submission();
+
+  CREATE OR REPLACE FUNCTION cp_preserve_runner_progress() RETURNS trigger LANGUAGE plpgsql AS $$
+  DECLARE
+    problem text;
+    entry jsonb;
+    attempts jsonb;
+  BEGIN
+    -- Hosted clients still send entire snapshots. They can replay canonical
+    -- attempts, but cannot alter or move a judge attempt between exercises.
+    IF EXISTS (
+      SELECT 1 FROM jsonb_each(NEW.progress->'exercises') exercise
+      CROSS JOIN LATERAL jsonb_array_elements(exercise.value->'attempts') item
+      WHERE item->>'id' LIKE 'judge:%' AND NOT EXISTS (
+        SELECT 1 FROM cp_submissions saved WHERE saved.id = item->>'id'
+          AND saved.exercise_id = exercise.key AND saved.attempt = item
+      )
+    ) THEN
+      RAISE EXCEPTION 'Judge history cannot be changed by a progress snapshot'
+        USING ERRCODE = '23514', CONSTRAINT = 'cp_runner_submission_reserved';
+    END IF;
+    FOR problem IN SELECT DISTINCT exercise_id FROM cp_submissions WHERE grading_source = 'runner' LOOP
+      entry := COALESCE(NEW.progress->'exercises'->problem, OLD.progress->'exercises'->problem);
+      IF entry IS NULL THEN
+        SELECT jsonb_build_object('draft', attempt->>'code', 'updatedAt', attempt->>'at',
+          'solved', false, 'attempts', '[]'::jsonb) INTO entry
+          FROM cp_submissions WHERE exercise_id = problem ORDER BY received_at DESC, id DESC LIMIT 1;
+      END IF;
+      SELECT jsonb_agg(recent.attempt ORDER BY recent.at, recent.id) INTO attempts FROM (
+        SELECT id, attempt, (attempt->>'at')::timestamptz AS at FROM cp_submissions
+        WHERE exercise_id = problem ORDER BY at DESC, id DESC LIMIT 20
+      ) recent;
+      entry := jsonb_set(entry, '{attempts}', attempts);
+      NEW.progress := jsonb_set(NEW.progress, ARRAY['exercises', problem], entry);
+    END LOOP;
+    -- Older hosted clients lack explicit intent metadata. Preserve their real
+    -- boolean transitions; merely saving a first draft is not a solved choice.
+    FOR problem, entry IN SELECT key, value FROM jsonb_each(NEW.progress->'exercises') LOOP
+      IF (entry->>'solved')::boolean IS DISTINCT FROM
+           COALESCE((OLD.progress->'exercises'->problem->>'solved')::boolean, false)
+         AND NEW.completion_choices->>problem IS NOT DISTINCT FROM OLD.completion_choices->>problem THEN
+        NEW.completion_choices := jsonb_set(NEW.completion_choices, ARRAY[problem], to_jsonb(gen_random_uuid()::text));
+      END IF;
+    END LOOP;
+    RETURN NEW;
+  END;
+  $$;
+  CREATE OR REPLACE TRIGGER cp_state_runner_guard BEFORE UPDATE OF progress ON cp_state
+    FOR EACH ROW EXECUTE FUNCTION cp_preserve_runner_progress();
+
+  CREATE OR REPLACE FUNCTION cp_finish_execution(
+    p_id uuid, p_token uuid, p_result jsonb, p_failure text, p_retry boolean
+  ) RETURNS SETOF cp_execution_jobs LANGUAGE plpgsql AS $$
+  DECLARE
+    profile cp_state%ROWTYPE;
+    job cp_execution_jobs%ROWTYPE;
+    finished timestamptz;
+    at_text text;
+    expected integer;
+    passed integer;
+    case_count integer;
+    has_error boolean;
+    verdict text;
+    attempt jsonb;
+    entry jsonb;
+    choices jsonb;
+    current_choice text;
+  BEGIN
+    -- Browser saves and streak repairs lock this same row first. Keep archive
+    -- inserts behind that lock to avoid deadlocks and partially saved results.
+    SELECT * INTO profile FROM cp_state WHERE profile_id = 1 FOR UPDATE;
+    IF NOT FOUND THEN RAISE EXCEPTION 'The practice profile is unavailable'; END IF;
+    SELECT * INTO job FROM cp_execution_jobs WHERE id = p_id FOR UPDATE;
+    IF NOT FOUND THEN RETURN; END IF;
+    IF job.state IN ('completed', 'failed', 'canceled') THEN
+      RETURN NEXT job;
+      RETURN;
+    END IF;
+    IF job.state NOT IN ('running', 'canceling') OR job.owner_token IS DISTINCT FROM p_token
+      OR job.lease_until <= clock_timestamp() THEN RETURN; END IF;
+
+    finished := clock_timestamp();
+    IF job.cancel_requested OR p_result IS NULL THEN
+      UPDATE cp_execution_jobs SET
+        state = CASE WHEN cancel_requested THEN 'canceled'
+          WHEN p_retry AND attempts < 2 THEN 'queued' ELSE 'failed' END,
+        result = NULL,
+        error = CASE WHEN cancel_requested OR (p_retry AND attempts < 2) THEN NULL ELSE p_failure END,
+        finished_at = CASE WHEN NOT cancel_requested AND p_retry AND attempts < 2 THEN NULL ELSE finished END,
+        owner_token = NULL, lease_until = NULL, container_name = NULL, revision = revision + 1
+        WHERE id = p_id RETURNING * INTO job;
+      RETURN NEXT job;
+      RETURN;
+    END IF;
+
+    SELECT jsonb_array_length(content->'cases') INTO expected FROM cp_grading_specs
+      WHERE exercise_id = job.problem_id AND problem_version = job.problem_version AND spec_version = job.spec_version;
+    IF jsonb_typeof(p_result) <> 'object' OR expected IS NULL
+      OR jsonb_typeof(COALESCE(p_result->'cases', '[]'::jsonb)) <> 'array'
+      OR (p_result ? 'durationMs' AND jsonb_typeof(p_result->'durationMs') <> 'number')
+      OR COALESCE((p_result->>'durationMs')::numeric, 0) < 0 THEN
+      RAISE EXCEPTION 'Invalid judge result' USING ERRCODE = '23514';
+    END IF;
+    case_count := jsonb_array_length(COALESCE(p_result->'cases', '[]'::jsonb));
+    IF case_count > expected OR (case_count <> expected AND COALESCE(p_result->>'error', '') = '') THEN
+      RAISE EXCEPTION 'Judge result does not match its grading cases' USING ERRCODE = '23514';
+    END IF;
+    SELECT count(*) FILTER (WHERE item->'passed' = 'true'::jsonb),
+      COALESCE(bool_or(COALESCE(item->>'error', '') <> ''), false)
+      INTO passed, has_error FROM jsonb_array_elements(COALESCE(p_result->'cases', '[]'::jsonb)) item;
+    has_error := has_error OR COALESCE(p_result->>'error', '') <> '';
+    verdict := CASE WHEN has_error THEN 'error' WHEN passed = expected THEN 'accepted' ELSE 'failed' END;
+    at_text := to_char(finished AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"');
+    attempt := jsonb_build_object('id', 'judge:' || job.id::text, 'at', at_text,
+      'code', job.code, 'problemVersion', job.problem_version, 'passed', passed,
+      'total', expected, 'status', verdict, 'durationMs', COALESCE((p_result->>'durationMs')::numeric, 0));
+    UPDATE cp_execution_jobs SET state = 'completed', result = p_result, error = NULL,
+      finished_at = finished, owner_token = NULL, lease_until = NULL, container_name = NULL, revision = revision + 1
+      WHERE id = p_id RETURNING * INTO job;
+    INSERT INTO cp_submissions(id, exercise_id, problem_version, attempt, grading_source, execution_job_id, received_at)
+      VALUES(attempt->>'id', job.problem_id, job.problem_version, attempt, 'runner', job.id, finished);
+
+    entry := COALESCE(profile.progress->'exercises'->job.problem_id,
+      jsonb_build_object('draft', job.code,
+        'updatedAt', to_char(job.created_at AT TIME ZONE 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+        'solved', false, 'attempts', '[]'::jsonb));
+    choices := profile.completion_choices;
+    current_choice := choices->>job.problem_id;
+    IF verdict = 'accepted' THEN
+      IF current_choice IS NOT DISTINCT FROM job.completion_choice_id OR current_choice = ANY(job.completion_intent_ids) THEN
+        entry := jsonb_set(entry, '{solved}', 'true'::jsonb);
+        choices := jsonb_set(choices, ARRAY[job.problem_id], to_jsonb('judge:' || job.id::text));
+      END IF;
+      INSERT INTO cp_write_receipts(id) SELECT unnest(job.completion_intent_ids) ON CONFLICT DO NOTHING;
+    END IF;
+    UPDATE cp_state SET progress = jsonb_set(profile.progress, ARRAY['exercises', job.problem_id], entry),
+      completion_choices = choices, revision = revision + 1, updated_at = finished WHERE profile_id = 1;
+    RETURN NEXT job;
+  END;
+  $$;
+  INSERT INTO cp_schema_migrations(version) VALUES(7) ON CONFLICT DO NOTHING;
 `;
 
 export function makePool(connectionString) {
@@ -422,10 +595,11 @@ export class StateConflict extends RequestError {
 export async function writeState(pool, rawValue) {
   const update = validateStateUpdate(rawValue);
   const client = await pool.connect();
+  let current;
   try {
     await client.query('BEGIN');
     await client.query('SELECT profile_id FROM cp_state WHERE profile_id = 1 FOR UPDATE');
-    const current = await readState(client);
+    current = await readState(client);
     if (update.migrationId && current.migrations.includes(update.migrationId)) {
       await client.query('COMMIT');
       return current;
@@ -469,10 +643,18 @@ export async function writeState(pool, rawValue) {
           'A submission ID is already associated with different immutable history.',
         );
     }
+    const completionChoices = Object.fromEntries(
+      Object.entries(update.solvedChanges).map(([id, change]) => [id, change.id]),
+    );
     await client.query(
-      `UPDATE cp_state SET revision = revision + 1, progress = $1, stars = $2, updated_at = now()
+      `UPDATE cp_state SET revision = revision + 1, progress = $1, stars = $2,
+        completion_choices = completion_choices || $3::jsonb, updated_at = now()
       WHERE profile_id = 1`,
-      [JSON.stringify(update.progress), JSON.stringify(update.stars)],
+      [
+        JSON.stringify(update.progress),
+        JSON.stringify(update.stars),
+        JSON.stringify(completionChoices),
+      ],
     );
     if (update.migrationId)
       await client.query('INSERT INTO cp_migration_receipts(id) VALUES($1)', [update.migrationId]);
@@ -486,6 +668,13 @@ export async function writeState(pool, rawValue) {
     return result;
   } catch (error) {
     await client.query('ROLLBACK').catch(() => {});
+    if (error.constraint === 'cp_runner_submission_reserved' && current) {
+      throw new StateConflict(
+        current,
+        'submission_conflict',
+        'Judge submission history cannot be changed by a browser save.',
+      );
+    }
     throw error;
   } finally {
     client.release();

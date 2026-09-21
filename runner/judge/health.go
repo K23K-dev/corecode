@@ -44,15 +44,16 @@ func monitorDependencies(ctx context.Context, cfg config, pool *pgxpool.Pool, do
 		update("docker", dockerReady)
 		update("images", imagesReady)
 		probe, cancel = context.WithTimeout(ctx, 5*time.Second)
-		_, schemaErr := pool.Exec(probe, "SELECT id, state, owner_token, lease_until FROM cp_execution_jobs LIMIT 0")
+		var queueReady bool
+		schemaErr := pool.QueryRow(probe, "SELECT "+queueSchemaReady).Scan(&queueReady)
 		cancel()
-		queueReady := schemaErr == nil
+		queueReady = queueReady && schemaErr == nil
 		update("queue", queueReady)
 		dependenciesReady := neonReady && dockerReady && imagesReady && queueReady
 		update("dependencies", dependenciesReady)
 		update("run", dependenciesReady && executor.ready())
 		update("submissions", dependenciesReady && executor.ready())
-		// Overall rollout stays NOT_SERVING until progress persistence and cutover.
+		// Overall rollout stays NOT_SERVING until the website cutover.
 		select {
 		case <-ctx.Done():
 			return

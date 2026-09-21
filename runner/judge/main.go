@@ -101,7 +101,7 @@ func serve(ctx context.Context) error {
 
 	serveDone := make(chan error, 1)
 	go func() { serveDone <- server.Serve(listener) }()
-	log.Printf("Judge listening on %s; check 'run' or 'submissions' health. Job results are stored separately from website progress.", judgeAddress)
+	log.Printf("Judge listening on %s; check 'run' or 'submissions' health. Submissions save history and progress atomically.", judgeAddress)
 	select {
 	case err := <-serveDone:
 		if err != nil && !errors.Is(err, grpc.ErrServerStopped) {
