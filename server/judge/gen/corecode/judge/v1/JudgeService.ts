@@ -126,6 +126,9 @@ export interface JudgeServiceClient extends grpc.Client {
     callback: grpc.requestCallback<_corecode_judge_v1_JobSnapshot__Output>,
   ): grpc.ClientUnaryCall;
 
+  /**
+   * Returns status metadata without grading results; use GetJob for the result.
+   */
   ListJobs(
     argument: _corecode_judge_v1_ListJobsRequest,
     metadata: grpc.Metadata,
@@ -146,6 +149,9 @@ export interface JudgeServiceClient extends grpc.Client {
     argument: _corecode_judge_v1_ListJobsRequest,
     callback: grpc.requestCallback<_corecode_judge_v1_ListJobsResponse__Output>,
   ): grpc.ClientUnaryCall;
+  /**
+   * Returns status metadata without grading results; use GetJob for the result.
+   */
   listJobs(
     argument: _corecode_judge_v1_ListJobsRequest,
     metadata: grpc.Metadata,
@@ -306,6 +312,9 @@ export interface JudgeServiceHandlers extends grpc.UntypedServiceImplementation 
     _corecode_judge_v1_JobSnapshot
   >;
 
+  /**
+   * Returns status metadata without grading results; use GetJob for the result.
+   */
   ListJobs: grpc.handleUnaryCall<
     _corecode_judge_v1_ListJobsRequest__Output,
     _corecode_judge_v1_ListJobsResponse

@@ -39,6 +39,7 @@ type JudgeServiceClient interface {
 	// Acknowledges a durable submission. Disconnecting does not cancel the job.
 	Submit(ctx context.Context, in *SubmitRequest, opts ...grpc.CallOption) (*JobSnapshot, error)
 	GetJob(ctx context.Context, in *JobRequest, opts ...grpc.CallOption) (*JobSnapshot, error)
+	// Returns status metadata without grading results; use GetJob for the result.
 	ListJobs(ctx context.Context, in *ListJobsRequest, opts ...grpc.CallOption) (*ListJobsResponse, error)
 	// Sends the current snapshot, then changes. Disconnecting only stops watching.
 	WatchJob(ctx context.Context, in *JobRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[JobSnapshot], error)
@@ -136,6 +137,7 @@ type JudgeServiceServer interface {
 	// Acknowledges a durable submission. Disconnecting does not cancel the job.
 	Submit(context.Context, *SubmitRequest) (*JobSnapshot, error)
 	GetJob(context.Context, *JobRequest) (*JobSnapshot, error)
+	// Returns status metadata without grading results; use GetJob for the result.
 	ListJobs(context.Context, *ListJobsRequest) (*ListJobsResponse, error)
 	// Sends the current snapshot, then changes. Disconnecting only stops watching.
 	WatchJob(*JobRequest, grpc.ServerStreamingServer[JobSnapshot]) error

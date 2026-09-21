@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 	"log"
+	"regexp"
 	"sync"
 	"time"
 
@@ -23,7 +24,10 @@ const maxExecutionOutput = 512000
 
 var errOutputLimit = errors.New("Execution output exceeded 512 KB.")
 
-// One executor owns capacity for both temporary runs and future queued submissions.
+var imageIDPattern = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
+var executionNamePattern = regexp.MustCompile(`^cp-job-[A-Za-z0-9-]{16,64}$`)
+
+// One executor owns capacity for both temporary runs and queued submissions.
 type executor struct {
 	ctx     context.Context
 	docker  *client.Client
@@ -32,6 +36,13 @@ type executor struct {
 	active  int
 	blocked bool
 	work    sync.WaitGroup
+}
+
+type executionSlot struct {
+	executor *executor
+	mu       sync.Mutex
+	consumed bool
+	cleaned  bool // Read after execute, release, or hold returns.
 }
 
 func newExecutor(ctx context.Context, docker *client.Client) *executor {
@@ -75,34 +86,91 @@ func (e *executor) shutdown() {
 	e.work.Wait()
 }
 
-func (e *executor) execute(ctx context.Context, input executionInput) (result *judgev1.RunResult, err error) {
+func (e *executor) imageFor(runtime string) (string, error) {
 	e.mu.Lock()
-	image := e.images[input.runtime]
+	defer e.mu.Unlock()
+	image := e.images[runtime]
+	if e.blocked || e.ctx.Err() != nil || image == "" {
+		return "", status.Error(codes.Unavailable, "The execution runtime is unavailable.")
+	}
+	return image, nil
+}
+
+func (e *executor) reserve() (*executionSlot, error) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
 	switch {
-	case e.blocked || e.ctx.Err() != nil || image == "":
-		err = status.Error(codes.Unavailable, "The execution runtime is unavailable.")
-	case e.active == 2:
-		err = status.Error(codes.ResourceExhausted, "Both execution slots are busy. Try again shortly.")
+	case e.blocked || e.ctx.Err() != nil || len(e.images) == 0:
+		return nil, status.Error(codes.Unavailable, "The execution runtime is unavailable.")
+	case e.active >= 2:
+		return nil, status.Error(codes.ResourceExhausted, "Both execution slots are busy. Try again shortly.")
 	default:
 		e.active++
 		e.work.Add(1)
 	}
-	e.mu.Unlock()
+	return &executionSlot{executor: e}, nil
+}
+
+// Release an unused reservation (for example, when a queue claim finds no job).
+func (s *executionSlot) release() {
+	s.finishUnused(true)
+}
+
+// Retain capacity when recovery could not confirm the old container is gone.
+func (s *executionSlot) hold() {
+	s.finishUnused(false)
+}
+
+func (s *executionSlot) finishUnused(cleaned bool) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if !s.consumed {
+		s.consumed = true
+		s.cleaned = cleaned
+		s.executor.mu.Lock()
+		if cleaned {
+			s.executor.active--
+		} else {
+			s.executor.blocked = true
+		}
+		s.executor.mu.Unlock()
+		s.executor.work.Done()
+	}
+}
+
+func (e *executor) execute(ctx context.Context, input executionInput) (*judgev1.RunResult, error) {
+	slot, err := e.reserve()
 	if err != nil {
 		return nil, err
 	}
+	return slot.execute(ctx, input)
+}
+
+func (s *executionSlot) execute(ctx context.Context, input executionInput) (result *judgev1.RunResult, err error) {
+	s.mu.Lock()
+	if s.consumed {
+		s.mu.Unlock()
+		return nil, status.Error(codes.Internal, "The execution slot was already used.")
+	}
+	s.consumed = true
+	s.mu.Unlock()
+	e := s.executor
 
 	started := time.Now()
 	runCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	stop := context.AfterFunc(e.ctx, cancel)
 	defer func() { stop(); cancel() }()
-	name := "cp-job-" + rand.Text()
+	name := input.name
+	if name == "" {
+		name = "cp-job-" + rand.Text()
+	}
 	containerID := name
 	creationAttempted, creationUncertain := false, false
 	defer func() {
 		removed := !creationAttempted || e.removeContainer(containerID, name)
 		e.mu.Lock()
-		if removed && !creationUncertain {
+		s.cleaned = removed && !creationUncertain
+		if s.cleaned {
 			e.active--
 		} else {
 			// A timed-out create can still finish inside Docker after our request ends.
@@ -134,6 +202,25 @@ func (e *executor) execute(ctx context.Context, input executionInput) (result *j
 	}
 	if runCtx.Err() != nil {
 		return failure(runCtx.Err())
+	}
+	if !e.ready() {
+		return nil, status.Error(codes.Unavailable, "The execution runtime is unavailable.")
+	}
+	image := input.imageID
+	if image == "" {
+		image, err = e.imageFor(input.runtime)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if !imageIDPattern.MatchString(image) || !executionNamePattern.MatchString(name) {
+		return nil, status.Error(codes.FailedPrecondition, "The saved execution configuration is invalid.")
+	}
+	// Queued work may use an older accepted image after this process's configured
+	// tag changes. Inspect and execute that immutable ID, without pulling images.
+	inspected, inspectErr := e.docker.ImageInspect(runCtx, image)
+	if inspectErr != nil || inspected.ID != image || inspected.Os != "linux" {
+		return failure(inspectErr)
 	}
 	creationAttempted = true
 	created, err := e.docker.ContainerCreate(runCtx, executionContainer(input.runtime, image, name))
@@ -302,6 +389,16 @@ func (e *executor) removeContainer(id, name string) bool {
 		case <-time.After(100 * time.Millisecond):
 		}
 	}
+}
+
+func (e *executor) recoverCleanup(name string) bool {
+	removed := executionNamePattern.MatchString(name) && e.removeContainer(name, name)
+	if !removed {
+		e.mu.Lock()
+		e.blocked = true
+		e.mu.Unlock()
+	}
+	return removed
 }
 
 // StdCopy calls both writers sequentially. Count stderr but retain only stdout,

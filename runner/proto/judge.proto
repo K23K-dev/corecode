@@ -12,6 +12,7 @@ service JudgeService {
   // Acknowledges a durable submission. Disconnecting does not cancel the job.
   rpc Submit(SubmitRequest) returns (JobSnapshot);
   rpc GetJob(JobRequest) returns (JobSnapshot);
+  // Returns status metadata without grading results; use GetJob for the result.
   rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
   // Sends the current snapshot, then changes. Disconnecting only stops watching.
   rpc WatchJob(JobRequest) returns (stream JobSnapshot);

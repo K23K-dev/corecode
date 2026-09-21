@@ -22,16 +22,11 @@ const judgeAddress = "127.0.0.1:50051"
 
 type judgeServer struct {
 	judgev1.UnimplementedJudgeServiceServer
-	pool     *pgxpool.Pool
-	executor *executor
+	queue *jobQueue
 }
 
 func (s *judgeServer) Run(ctx context.Context, request *judgev1.RunRequest) (*judgev1.RunResult, error) {
-	input, err := prepareExecution(ctx, s.pool, request, "example")
-	if err != nil {
-		return nil, err
-	}
-	return s.executor.execute(ctx, input)
+	return s.queue.run(ctx, request)
 }
 
 func main() {
@@ -67,13 +62,16 @@ func serve(ctx context.Context) error {
 	}
 	defer docker.Close()
 	executor := newExecutor(ctx, docker)
+	queue := newJobQueue(ctx, &jobStore{pool: pool}, executor)
+	queueDone := make(chan struct{})
+	go func() { defer close(queueDone); queue.serve() }()
 
 	healthCheck := health.NewServer()
-	for _, name := range []string{"", judgev1.JudgeService_ServiceDesc.ServiceName, "run", "dependencies", "neon", "docker", "images"} {
+	for _, name := range []string{"", judgev1.JudgeService_ServiceDesc.ServiceName, "run", "submissions", "queue", "dependencies", "neon", "docker", "images"} {
 		healthCheck.SetServingStatus(name, healthv1.HealthCheckResponse_NOT_SERVING)
 	}
 	server := grpc.NewServer(grpc.MaxRecvMsgSize(1<<20), grpc.MaxSendMsgSize(1<<20))
-	judgev1.RegisterJudgeServiceServer(server, &judgeServer{pool: pool, executor: executor})
+	judgev1.RegisterJudgeServiceServer(server, &judgeServer{queue: queue})
 	healthv1.RegisterHealthServer(server, healthCheck)
 
 	monitorCtx, stopMonitor := context.WithCancel(ctx)
@@ -98,11 +96,12 @@ func serve(ctx context.Context) error {
 			<-serverStopped
 		}
 		<-executionsStopped
+		<-queueDone
 	}()
 
 	serveDone := make(chan error, 1)
 	go func() { serveDone <- server.Serve(listener) }()
-	log.Printf("Judge listening on %s; check 'run' health before running examples. Durable submissions are not enabled yet.", judgeAddress)
+	log.Printf("Judge listening on %s; check 'run' or 'submissions' health. Job results are stored separately from website progress.", judgeAddress)
 	select {
 	case err := <-serveDone:
 		if err != nil && !errors.Is(err, grpc.ErrServerStopped) {

@@ -124,6 +124,44 @@ const MIGRATION_SQL = `
   ALTER TABLE cp_submissions ALTER COLUMN received_at SET DEFAULT statement_timestamp();
   ALTER TABLE cp_streak_repairs ALTER COLUMN repaired_at SET DEFAULT statement_timestamp();
   INSERT INTO cp_schema_migrations(version) VALUES(5) ON CONFLICT DO NOTHING;
+  CREATE UNIQUE INDEX IF NOT EXISTS cp_grading_specs_version_idx
+    ON cp_grading_specs(exercise_id, problem_version, spec_version);
+  CREATE TABLE IF NOT EXISTS cp_execution_jobs (
+    id uuid PRIMARY KEY,
+    problem_id text NOT NULL,
+    problem_version text NOT NULL,
+    spec_version text NOT NULL,
+    code text NOT NULL,
+    runtime text NOT NULL CHECK (runtime IN ('python', 'javascript', 'sql', 'shell')),
+    image_id text NOT NULL,
+    completion_intent_ids text[] NOT NULL DEFAULT '{}',
+    request_fingerprint text NOT NULL CHECK (request_fingerprint ~ '^[a-f0-9]{64}$'),
+    state text NOT NULL DEFAULT 'queued'
+      CHECK (state IN ('queued', 'running', 'canceling', 'completed', 'failed', 'canceled')),
+    result jsonb,
+    error text,
+    revision bigint NOT NULL DEFAULT 1 CHECK (revision > 0),
+    created_at timestamptz NOT NULL DEFAULT clock_timestamp(),
+    started_at timestamptz,
+    finished_at timestamptz,
+    owner_token uuid,
+    lease_until timestamptz,
+    container_name text,
+    attempts integer NOT NULL DEFAULT 0 CHECK (attempts BETWEEN 0 AND 2),
+    cancel_requested boolean NOT NULL DEFAULT false,
+    FOREIGN KEY (problem_id, problem_version, spec_version)
+      REFERENCES cp_grading_specs(exercise_id, problem_version, spec_version),
+    CHECK ((state IN ('running', 'canceling')) =
+      (owner_token IS NOT NULL AND lease_until IS NOT NULL AND container_name IS NOT NULL)),
+    CHECK ((state IN ('completed', 'failed', 'canceled')) = (finished_at IS NOT NULL))
+  );
+  CREATE INDEX IF NOT EXISTS cp_execution_jobs_queue_idx
+    ON cp_execution_jobs(created_at, id) WHERE state = 'queued';
+  CREATE INDEX IF NOT EXISTS cp_execution_jobs_lease_idx
+    ON cp_execution_jobs(lease_until) WHERE state IN ('running', 'canceling');
+  CREATE INDEX IF NOT EXISTS cp_execution_jobs_problem_idx
+    ON cp_execution_jobs(problem_id, created_at DESC, id DESC);
+  INSERT INTO cp_schema_migrations(version) VALUES(6) ON CONFLICT DO NOTHING;
 `;
 
 export function makePool(connectionString) {

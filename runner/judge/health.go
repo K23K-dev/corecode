@@ -43,10 +43,16 @@ func monitorDependencies(ctx context.Context, cfg config, pool *pgxpool.Pool, do
 		cancel()
 		update("docker", dockerReady)
 		update("images", imagesReady)
-		dependenciesReady := neonReady && dockerReady && imagesReady
+		probe, cancel = context.WithTimeout(ctx, 5*time.Second)
+		_, schemaErr := pool.Exec(probe, "SELECT id, state, owner_token, lease_until FROM cp_execution_jobs LIMIT 0")
+		cancel()
+		queueReady := schemaErr == nil
+		update("queue", queueReady)
+		dependenciesReady := neonReady && dockerReady && imagesReady && queueReady
 		update("dependencies", dependenciesReady)
 		update("run", dependenciesReady && executor.ready())
-		// Overall health stays NOT_SERVING until durable submissions and recovery exist.
+		update("submissions", dependenciesReady && executor.ready())
+		// Overall rollout stays NOT_SERVING until progress persistence and cutover.
 		select {
 		case <-ctx.Done():
 			return

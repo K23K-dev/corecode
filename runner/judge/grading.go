@@ -26,9 +26,12 @@ const maxRunnerPayload = 1024 * 1024
 var problemVersionPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
 type executionInput struct {
-	runtime   string
-	payload   []byte
-	caseCount int
+	runtime     string
+	specVersion string
+	imageID     string
+	name        string
+	payload     []byte
+	caseCount   int
 }
 
 func prepareExecution(ctx context.Context, pool *pgxpool.Pool, request *judgev1.RunRequest, mode string) (executionInput, error) {
@@ -62,13 +65,47 @@ func prepareExecution(ctx context.Context, pool *pgxpool.Pool, request *judgev1.
 		return executionInput{}, status.Error(codes.FailedPrecondition, "This problem changed. Refresh before submitting.")
 	}
 
-	unavailable := status.Error(codes.Unavailable, "Grading is temporarily unavailable for this problem. Nothing was marked solved.")
+	if specVersion == nil {
+		return executionInput{}, invalidGradingSpec()
+	}
+	return makeExecutionInput(request.ProblemId, version, *specVersion, request.Code, mode, rawSpec)
+}
+
+// Accepted submissions retain their exact immutable spec even after the public
+// problem changes or is retired. Only acceptance checks the current version.
+func prepareStoredExecution(ctx context.Context, pool *pgxpool.Pool, problemID, version, specVersion, code, runtime string) (executionInput, error) {
+	var rawSpec []byte
+	err := pool.QueryRow(ctx, `SELECT content FROM cp_grading_specs
+		WHERE exercise_id = $1 AND problem_version = $2 AND spec_version = $3`,
+		problemID, version, specVersion).Scan(&rawSpec)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return executionInput{}, invalidGradingSpec()
+	}
+	if err != nil {
+		if ctx.Err() != nil {
+			return executionInput{}, status.FromContextError(ctx.Err()).Err()
+		}
+		return executionInput{}, status.Error(codes.Unavailable, "The problem catalog is temporarily unavailable.")
+	}
+	input, err := makeExecutionInput(problemID, version, specVersion, code, "submit", rawSpec)
+	if err == nil && input.runtime != runtime {
+		return executionInput{}, invalidGradingSpec()
+	}
+	return input, err
+}
+
+func invalidGradingSpec() error {
+	return status.Error(codes.FailedPrecondition, "The grading specification is unavailable or invalid. Nothing was marked solved.")
+}
+
+func makeExecutionInput(problemID, version, specVersion, code, mode string, rawSpec []byte) (executionInput, error) {
+	unavailable := invalidGradingSpec()
 	var spec map[string]any
-	if len(rawSpec) > maxRunnerPayload || json.Unmarshal(rawSpec, &spec) != nil || !safeObject(spec) || specVersion == nil {
+	if len(rawSpec) > maxRunnerPayload || json.Unmarshal(rawSpec, &spec) != nil || !safeObject(spec) {
 		return executionInput{}, unavailable
 	}
 	digest := sha256.Sum256(stableJSON(spec))
-	if hex.EncodeToString(digest[:]) != *specVersion {
+	if hex.EncodeToString(digest[:]) != specVersion {
 		return executionInput{}, unavailable
 	}
 	runtime, _ := spec["runtime"].(string)
@@ -96,9 +133,9 @@ func prepareExecution(ctx context.Context, pool *pgxpool.Pool, request *judgev1.
 	payload := new(bytes.Buffer)
 	encoder := json.NewEncoder(payload)
 	encoder.SetEscapeHTML(false)
-	err = encoder.Encode(map[string]any{
-		"protocolVersion": 2, "problemId": request.ProblemId, "problemVersion": version,
-		"spec": json.RawMessage(rawSpec), "code": request.Code, "mode": mode,
+	err := encoder.Encode(map[string]any{
+		"protocolVersion": 2, "problemId": problemID, "problemVersion": version,
+		"spec": json.RawMessage(rawSpec), "code": code, "mode": mode,
 	})
 	if err != nil || payload.Len() > maxRunnerPayload {
 		return executionInput{}, unavailable
@@ -107,7 +144,7 @@ func prepareExecution(ctx context.Context, pool *pgxpool.Pool, request *judgev1.
 	if mode == "example" {
 		caseCount = 1
 	}
-	return executionInput{runtime: runtime, payload: payload.Bytes(), caseCount: caseCount}, nil
+	return executionInput{runtime: runtime, specVersion: specVersion, payload: payload.Bytes(), caseCount: caseCount}, nil
 }
 
 func validProblemID(value string) bool {
@@ -174,7 +211,7 @@ func stableJSON(value any) []byte {
 }
 
 func parseExecutionResult(data []byte, expectedCases int) (*judgev1.RunResult, error) {
-	invalid := status.Error(codes.Unavailable, "The runner returned an invalid result. Nothing was marked solved.")
+	invalid := status.Error(codes.FailedPrecondition, "The runner returned an invalid result. Nothing was marked solved.")
 	if len(data) > maxExecutionOutput || !utf8.Valid(data) || expectedCases < 1 || expectedCases > 32 {
 		return nil, invalid
 	}
