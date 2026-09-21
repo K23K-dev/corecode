@@ -35,7 +35,12 @@ import {
   type ProgressData,
 } from './lib/progress';
 import { OUTBOX_PREFIX, type Catalog, type ProgressClient } from './lib/database-client';
-import { PracticeRunner } from './lib/practice-runner';
+import {
+  PracticeRunner,
+  pendingSubmissionProblemIds,
+  type ExecutionOutcome,
+  type JobSnapshot,
+} from './lib/practice-runner';
 
 const CodeEditor = dynamic(() => import('./components/CodeEditor'), { ssr: false });
 const ProblemPanel = dynamic(() => import('./components/ProblemPanel'));
@@ -123,10 +128,13 @@ function WorkspaceApp({
   const [execution, setExecution] = useState<Execution | null>(null);
   const [celebration, setCelebration] = useState<number | null>(null);
   const [running, setRunning] = useState(false);
+  const [recovering, setRecovering] = useState(page === 'workspace');
+  const [stopping, setStopping] = useState(false);
   const [notice, setNotice] = useState('');
   const [viewAttempt, setViewAttempt] = useState<Attempt | null>(null);
   const runner = useRef<PracticeRunner | null>(null);
   const request = useRef(0);
+  const cancellationNotice = useRef('');
   const code = data.exercises[exercise.id]?.draft ?? exercise.starterCode;
   const attempts = data.exercises[exercise.id]?.attempts ?? [];
   const ready = Boolean(exercise.cases?.length);
@@ -138,14 +146,91 @@ function WorkspaceApp({
     return () => window.clearTimeout(timer);
   }, [celebration]);
 
+  const showJob = useCallback((job: JobSnapshot, ticket: number, submittedCode?: string) => {
+    if (ticket !== request.current) return;
+    if (!['queued', 'running'].includes(job.state)) {
+      const previous = cancellationNotice.current;
+      setNotice((current) => (current === previous ? '' : current));
+      cancellationNotice.current = '';
+    }
+    setRecovering(false);
+    setRunning(['queued', 'running', 'canceling'].includes(job.state));
+    setConsoleOpen(true);
+    setExecution({
+      mode: 'submit',
+      jobState: job.state,
+      result: job.result,
+      error:
+        job.state === 'canceled'
+          ? 'Submission canceled. Your code is still in the editor.'
+          : job.error,
+      code: submittedCode,
+    });
+  }, []);
+
+  const showDurableResult = useCallback(
+    async (outcome: ExecutionOutcome, ticket: number) => {
+      await client.refresh();
+      const job = outcome.job;
+      if (job) {
+        const saved = client
+          .getSnapshot()
+          .progress.exercises[job.problemId]?.attempts.find(
+            (attempt) => attempt.id === `judge:${job.jobId}`,
+          );
+        showJob(job, ticket, outcome.code ?? saved?.code);
+      }
+    },
+    [client, showJob],
+  );
+
   useEffect(() => {
     const activeRunner = new PracticeRunner();
     runner.current = activeRunner;
+    const ticket = ++request.current;
+    if (page === 'workspace') {
+      void activeRunner
+        .recover(exercise, (job, submittedCode) => showJob(job, ticket, submittedCode))
+        .then(async (outcome) => {
+          if (outcome) await showDurableResult(outcome, ticket);
+        })
+        .catch((error) => {
+          if (ticket !== request.current) return;
+          setConsoleOpen(true);
+          setExecution({
+            mode: 'submit',
+            error: error.message ?? 'Could not reconnect to your submission.',
+          });
+        })
+        .finally(() => {
+          if (ticket === request.current) {
+            setRecovering(false);
+            setRunning(false);
+          }
+        });
+    }
     return () => {
       ++request.current;
-      activeRunner.cancel();
+      activeRunner.detach();
     };
-  }, []);
+  }, [exercise, page, showDurableResult, showJob]);
+
+  useEffect(() => {
+    void client.refresh();
+    if (page !== 'library') return;
+    // Keep the library current when a submission finishes after leaving its editor.
+    const observers = pendingSubmissionProblemIds().flatMap((id) => {
+      const pendingExercise = exercises.find((item) => item.id === id);
+      if (!pendingExercise) return [];
+      const observer = new PracticeRunner();
+      void observer
+        .recover(pendingExercise)
+        .then(() => client.refresh())
+        .catch(() => {});
+      return [observer];
+    });
+    return () => observers.forEach((observer) => observer.detach());
+  }, [client, exercises, page]);
   useEffect(() => {
     const save = () => {
       void client.flush();
@@ -176,7 +261,7 @@ function WorkspaceApp({
 
   function selectExercise(next: Exercise, tab: 'question' | 'solution' = 'question') {
     ++request.current;
-    runner.current?.cancel();
+    runner.current?.detach();
     router.push(
       `/problems/${encodeURIComponent(next.id)}${tab === 'solution' ? '?tab=solution' : ''}`,
     );
@@ -186,7 +271,7 @@ function WorkspaceApp({
   }, [exercise.title, page]);
   function openLibrary() {
     ++request.current;
-    runner.current?.cancel();
+    runner.current?.detach();
     setRunning(false);
     setCelebration(null);
     router.push('/');
@@ -214,20 +299,37 @@ function WorkspaceApp({
 
   const execute = useCallback(
     async (mode: 'example' | 'submit') => {
-      if (running || !exercise.cases || !runner.current) return;
+      if (running || recovering || stopping || !exercise.cases || !runner.current) return;
       const ticket = ++request.current;
       const submittedCode = code;
-      const started = performance.now();
       setCelebration(null);
-      setExecution(null);
+      setExecution({ mode });
       setRunning(true);
       setMobilePane('code');
       setNotice('');
       setConsoleOpen(true);
       let attempt: Attempt | undefined;
       try {
-        const result = await runner.current.run(exercise, submittedCode, mode);
+        const outcome = await runner.current.run(exercise, submittedCode, mode, {
+          completionIntentIds:
+            mode === 'submit' ? client.captureCompletionIntents(exercise.id) : [],
+          onJob: (job, savedCode) => showJob(job, ticket, savedCode),
+        });
+        if (outcome.durable) {
+          await showDurableResult(outcome, ticket);
+          if (
+            ticket === request.current &&
+            outcome.result &&
+            !outcome.result.error &&
+            outcome.result.cases.length === exercise.cases.length &&
+            outcome.result.cases.every((test) => test.passed === true && !test.error)
+          )
+            setCelebration(ticket);
+          return;
+        }
         if (ticket !== request.current) return;
+        const result = outcome.result;
+        if (!result) throw new Error('The runner did not return a result.');
         setExecution({ mode, result, code: submittedCode });
         if (mode === 'submit') {
           const passed = result.cases.filter((test) => test.passed).length;
@@ -258,17 +360,6 @@ function WorkspaceApp({
           code: submittedCode,
           error: reason instanceof Error ? reason.message : 'The run failed. Please try again.',
         });
-        if (mode === 'submit')
-          attempt = {
-            id: crypto.randomUUID(),
-            at: new Date().toISOString(),
-            code: submittedCode,
-            problemVersion: exercise.version!,
-            passed: 0,
-            total: exercise.cases.length,
-            status: 'error',
-            durationMs: performance.now() - started,
-          };
       } finally {
         if (ticket === request.current) setRunning(false);
       }
@@ -292,7 +383,7 @@ function WorkspaceApp({
         }));
       }
     },
-    [running, exercise, code, setData],
+    [running, recovering, stopping, exercise, code, setData, client, showJob, showDurableResult],
   );
   useEffect(() => {
     const shortcut = (event: KeyboardEvent) => {
@@ -309,19 +400,36 @@ function WorkspaceApp({
     window.addEventListener('keydown', shortcut);
     return () => window.removeEventListener('keydown', shortcut);
   }, [execute, page]);
-  function cancel() {
+  async function cancel() {
+    if (stopping) return;
     setCelebration(null);
-    ++request.current;
-    runner.current?.cancel();
-    setRunning(false);
-    setExecution({ mode: 'example', error: 'Run canceled. Your code is still in the editor.' });
+    const ticket = request.current;
+    setStopping(true);
+    try {
+      const job = await runner.current?.cancel();
+      if (ticket !== request.current) return;
+      if (!job) {
+        ++request.current;
+        setRunning(false);
+        setExecution({ mode: 'example', error: 'Run canceled. Your code is still in the editor.' });
+      }
+    } catch (error) {
+      if (ticket === request.current) {
+        cancellationNotice.current =
+          error instanceof Error ? error.message : 'Cancellation could not be confirmed.';
+        setNotice(cancellationNotice.current);
+      }
+    } finally {
+      setStopping(false);
+    }
   }
 
   function restoreProgress(next: ProgressData) {
     setCelebration(null);
     ++request.current;
-    runner.current?.cancel();
+    runner.current?.detach();
     setRunning(false);
+    setRecovering(false);
     setExecution(null);
     client.restore(next);
   }
@@ -450,7 +558,7 @@ function WorkspaceApp({
                         'That edit exceeds the code size limit (32,768 characters / 50 KiB). Your existing code has been kept.',
                       )
                     }
-                    readOnly={running}
+                    readOnly={running && !execution?.jobState}
                   />
                   {celebration !== null && <SubmissionCelebration key={celebration} />}
                 </div>
@@ -475,7 +583,7 @@ function WorkspaceApp({
                       <Results
                         execution={execution}
                         running={running}
-                        stale={Boolean(execution?.code && execution.code !== code)}
+                        stale={execution?.code !== undefined && execution.code !== code}
                       />
                     </div>
                   </section>
@@ -490,15 +598,20 @@ function WorkspaceApp({
                     Console{consoleOpen ? <ChevronDown size={15} /> : <ChevronUp size={15} />}
                   </button>
                   <div>
-                    {running ? (
-                      <button className="button stop" onClick={cancel}>
-                        <Square size={14} /> Stop
+                    {running || stopping ? (
+                      <button
+                        className="button stop"
+                        onClick={() => void cancel()}
+                        disabled={stopping || execution?.jobState === 'canceling'}
+                      >
+                        <Square size={14} />{' '}
+                        {stopping || execution?.jobState === 'canceling' ? 'Stopping…' : 'Stop'}
                       </button>
                     ) : (
                       <>
                         <button
                           className="button secondary"
-                          disabled={!ready}
+                          disabled={!ready || recovering}
                           onClick={() => void execute('example')}
                           aria-label="Run example"
                           title="Run example · Ctrl+Enter"
@@ -507,7 +620,7 @@ function WorkspaceApp({
                         </button>
                         <button
                           className="button primary"
-                          disabled={!ready}
+                          disabled={!ready || recovering}
                           onClick={() => void execute('submit')}
                           title="Ctrl+Shift+Enter"
                         >

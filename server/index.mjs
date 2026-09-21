@@ -23,7 +23,7 @@ export function readVercelConfiguration(environment = process.env) {
 }
 
 /** Lazy and shared per warm function; building Next never connects or seeds content. */
-export function createApiHandler({ environment = process.env, executeCode } = {}) {
+export function createApiHandler({ environment = process.env, executeCode, judge } = {}) {
   let app;
   return async (request) => {
     if (!app) {
@@ -39,6 +39,8 @@ export function createApiHandler({ environment = process.env, executeCode } = {}
         app = createApp({
           appOrigin: configuration.appOrigin,
           hosted,
+          judge,
+          judgeAddress: environment.JUDGE_ADDRESS ?? '127.0.0.1:50051',
           getPool: () => {
             ready ??= (async () => {
               // Local schema-only setup replaces the former custom dev launcher.
@@ -56,12 +58,8 @@ export function createApiHandler({ environment = process.env, executeCode } = {}
           executeCode:
             executeCode ??
             (async (...args) => {
-              if (hosted) {
-                const { executeSandboxProblem } = await import('../runner/sandbox.mjs');
-                return executeSandboxProblem(...args);
-              }
-              const { executeProblem } = await import('../runner/execution.mjs');
-              return executeProblem(...args);
+              const { executeSandboxProblem } = await import('../runner/sandbox.mjs');
+              return executeSandboxProblem(...args);
             }),
         });
       } catch (error) {

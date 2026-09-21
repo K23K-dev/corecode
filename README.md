@@ -4,7 +4,7 @@ A Next.js coding-practice website. Problems, grading cases, and progress live in
 
 ## Run locally
 
-Requires Node.js 22.12+, Docker Desktop running, and a private `.env` containing
+Requires Node.js 22.12+, Go 1.27+, Docker Desktop running, and a private `.env` containing
 `POSTGRES_URL` with `sslmode=require`. Use [.env.example](.env.example) as the template.
 
 ```sh
@@ -16,10 +16,9 @@ npm run dev
 Open [localhost:5173](http://127.0.0.1:5173). For a built version, run
 `npm run build` followed by `npm start`.
 
-The Go judge is being built separately; website grading still uses the existing
-runner. With Go 1.27+ installed, run `npm run judge:dev` in another terminal.
-It reads `.env` and exposes runs and durable submissions on `127.0.0.1:50051`.
-Submissions save history and progress together; website integration comes next.
+Run `npm run judge:dev` in another terminal for local grading. It reads `.env`
+and listens on `127.0.0.1:50051`. Submissions continue after navigation and save
+history and progress together.
 Use `npm run judge:check` to format-check, vet, and build it. Regenerating bindings
 with `npm run judge:generate` also requires protoc 36.2.
 

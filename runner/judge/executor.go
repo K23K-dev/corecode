@@ -222,18 +222,32 @@ func (s *executionSlot) execute(ctx context.Context, input executionInput) (resu
 	if inspectErr != nil || inspected.ID != image || inspected.Os != "linux" {
 		return failure(inspectErr)
 	}
+	if runCtx.Err() != nil {
+		return failure(runCtx.Err())
+	}
+	// Finish Docker's setup handshake even if Stop arrives. Abandoning create
+	// can leave a late container behind; interrupted attach can lose its socket.
+	setupCtx, finishSetup := context.WithTimeout(context.WithoutCancel(runCtx), 10*time.Second)
+	defer finishSetup()
 	creationAttempted = true
-	created, err := e.docker.ContainerCreate(runCtx, executionContainer(input.runtime, image, name))
+	created, err := e.docker.ContainerCreate(setupCtx, executionContainer(input.runtime, image, name))
 	if err != nil {
 		creationUncertain = true
 		return failure(err)
 	}
 	containerID = created.ID
-	attachment, err := e.attach(runCtx, containerID)
+	if runCtx.Err() != nil {
+		return failure(runCtx.Err())
+	}
+	attachment, err := e.attach(setupCtx, containerID)
 	if err != nil {
 		return failure(err)
 	}
 	defer attachment.Close()
+	finishSetup()
+	if runCtx.Err() != nil {
+		return failure(runCtx.Err())
+	}
 	closeOnCancel := context.AfterFunc(runCtx, attachment.Close)
 	defer closeOnCancel()
 

@@ -1,12 +1,12 @@
 import 'server-only';
-import { fileURLToPath } from 'node:url';
+import { resolve } from 'node:path';
 import { credentials, loadPackageDefinition } from '@grpc/grpc-js';
 import { loadSync } from '@grpc/proto-loader';
 import type { ProtoGrpcType as JudgeProto } from './gen/judge.js';
 import type { ProtoGrpcType as HealthProto } from './gen/health.js';
 import type { HealthCheckResponse__Output } from './gen/grpc/health/v1/HealthCheckResponse.js';
 
-const protoDirectory = fileURLToPath(new URL('../../runner/proto/', import.meta.url));
+const protoDirectory = resolve(process.cwd(), 'runner/proto');
 const definitions = loadSync(['judge.proto', 'grpc/health/v1/health.proto'], {
   includeDirs: [protoDirectory],
   longs: String,
@@ -15,7 +15,7 @@ const definitions = loadSync(['judge.proto', 'grpc/health/v1/health.proto'], {
 });
 const protocol = loadPackageDefinition(definitions) as unknown as JudgeProto & HealthProto;
 
-/** Internal transport only; the website keeps its current runner until cutover. */
+/** Internal transport for local website execution; hosted requests use Sandbox. */
 export function createJudgeClient(address = process.env.JUDGE_ADDRESS ?? '127.0.0.1:50051') {
   const match = /^(?:127\.0\.0\.1|localhost|\[::1\]):([0-9]+)$/.exec(address);
   if (!match || Number(match[1]) < 1 || Number(match[1]) > 65535) {

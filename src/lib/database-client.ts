@@ -630,6 +630,17 @@ export class ProgressClient {
     if (!this.disposed) this.timer = setTimeout(() => void this.flush(), delay);
   }
 
+  captureCompletionIntents(problemId: string): string[] {
+    const change = this.pending.solved[problemId];
+    if (!change) return [];
+    const ids = [...new Set([change.id, ...(change.supersedes ?? [])])].filter(
+      (id) => !this.base.writes.includes(id),
+    );
+    if (ids.length > 256)
+      throw new Error('Save your pending completion changes before submitting.');
+    return ids;
+  }
+
   flush(): Promise<void> {
     clearTimeout(this.timer);
     if (this.busy) return this.busy;
@@ -763,11 +774,17 @@ export class ProgressClient {
     }
   }
 
-  async refresh() {
-    if (this.disposed || this.busy) return;
+  async refresh(): Promise<void> {
+    if (this.disposed) return;
     try {
+      // A judge result may arrive while a draft is saving. Read after that save
+      // settles, and repeat if another save starts during the database request.
+      while (this.busy) await this.busy;
+      if (this.disposed) return;
       const latest = await this.readState();
-      if (this.disposed || this.busy || latest.revision < this.base.revision) return;
+      if (this.disposed) return;
+      if (this.busy) return await this.refresh();
+      if (latest.revision < this.base.revision) return;
       this.base = latest;
       for (const kind of ['stars', 'solved'] as const)
         for (const [id, change] of Object.entries(this.pending[kind]))

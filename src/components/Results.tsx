@@ -1,12 +1,13 @@
 import { useEffect, useState, type CSSProperties } from 'react';
 import { Check, CircleAlert, CircleCheck, LoaderCircle, Terminal, X } from 'lucide-react';
-import type { RunResult } from '../lib/practice-runner';
+import type { JobSnapshot, RunResult } from '../lib/practice-runner';
 
 export interface Execution {
   mode: 'example' | 'submit';
   result?: RunResult;
   error?: string;
   code?: string;
+  jobState?: JobSnapshot['state'];
 }
 
 const confettiColors = ['#22c55e', '#559bf8', '#d65fa6', '#f2b84b', '#a482ed'];
@@ -58,8 +59,20 @@ export default function Results({
     return (
       <div className="empty-state execution-pending" role="status">
         <LoaderCircle className="spin" size={25} />
-        <h3>Running your code…</h3>
-        <p>You can stop this run at any time.</p>
+        <h3>
+          {execution?.jobState === 'queued'
+            ? 'Submission queued'
+            : execution?.jobState === 'canceling'
+              ? 'Canceling submission…'
+              : execution?.mode === 'submit'
+                ? 'Grading your submission…'
+                : 'Running your code…'}
+        </h3>
+        <p>
+          {execution?.jobState
+            ? 'You can leave this page and return to your result.'
+            : 'You can stop this run at any time.'}
+        </p>
       </div>
     );
   if (!execution)
@@ -74,14 +87,21 @@ export default function Results({
         </p>
       </div>
     );
+  const staleNotice = stale && (
+    <p className="stale-result" role="status">
+      Your code has changed. These results are from the previous run.
+    </p>
+  );
   if (execution.error || execution.result?.error)
     return (
       <div className="execution-error" role="alert">
+        {staleNotice}
         <h3>
-          <CircleAlert size={19} /> Run stopped
+          <CircleAlert size={19} />{' '}
+          {execution.mode === 'submit' ? 'Submission stopped' : 'Run stopped'}
         </h3>
         <pre>{execution.error || execution.result?.error}</pre>
-        <p>Check your code, then try again. This run has not been marked as solved.</p>
+        <p>Your code is still saved.</p>
       </div>
     );
   const result = execution.result;
@@ -97,11 +117,7 @@ export default function Results({
         : '';
   return (
     <div className="result-content">
-      {stale && (
-        <p className="stale-result" role="status">
-          Your code has changed. These results are from the previous run.
-        </p>
-      )}
+      {staleNotice}
       <div className={`result-heading ${success ? 'success' : 'failure'}`} role="status">
         {success ? <CircleCheck size={20} /> : <CircleAlert size={20} />}
         <strong>

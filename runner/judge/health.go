@@ -5,6 +5,7 @@ import (
 	"log"
 	"time"
 
+	judgev1 "github.com/K23K-dev/corecode/runner/judge/gen"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/moby/moby/client"
 	"google.golang.org/grpc/health"
@@ -53,7 +54,8 @@ func monitorDependencies(ctx context.Context, cfg config, pool *pgxpool.Pool, do
 		update("dependencies", dependenciesReady)
 		update("run", dependenciesReady && executor.ready())
 		update("submissions", dependenciesReady && executor.ready())
-		// Overall rollout stays NOT_SERVING until the website cutover.
+		update("", dependenciesReady && executor.ready())
+		update(judgev1.JudgeService_ServiceDesc.ServiceName, dependenciesReady && executor.ready())
 		select {
 		case <-ctx.Done():
 			return
