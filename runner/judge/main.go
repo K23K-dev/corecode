@@ -20,10 +20,18 @@ import (
 
 const judgeAddress = "127.0.0.1:50051"
 
-// Execution and persistence arrive in the next checkpoints. Until then, every
-// grading RPC returns UNIMPLEMENTED rather than accepting work it cannot finish.
 type judgeServer struct {
 	judgev1.UnimplementedJudgeServiceServer
+	pool     *pgxpool.Pool
+	executor *executor
+}
+
+func (s *judgeServer) Run(ctx context.Context, request *judgev1.RunRequest) (*judgev1.RunResult, error) {
+	input, err := prepareExecution(ctx, s.pool, request, "example")
+	if err != nil {
+		return nil, err
+	}
+	return s.executor.execute(ctx, input)
 }
 
 func main() {
@@ -36,6 +44,8 @@ func main() {
 }
 
 func serve(ctx context.Context) error {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
 	cfg, err := loadConfig()
 	if err != nil {
 		return err
@@ -56,41 +66,49 @@ func serve(ctx context.Context) error {
 		return errors.New("Cannot configure Docker; check DOCKER_HOST and Docker TLS settings.")
 	}
 	defer docker.Close()
+	executor := newExecutor(ctx, docker)
 
 	healthCheck := health.NewServer()
-	for _, name := range []string{"", judgev1.JudgeService_ServiceDesc.ServiceName, "dependencies", "neon", "docker", "images"} {
+	for _, name := range []string{"", judgev1.JudgeService_ServiceDesc.ServiceName, "run", "dependencies", "neon", "docker", "images"} {
 		healthCheck.SetServingStatus(name, healthv1.HealthCheckResponse_NOT_SERVING)
 	}
 	server := grpc.NewServer(grpc.MaxRecvMsgSize(1<<20), grpc.MaxSendMsgSize(1<<20))
-	judgev1.RegisterJudgeServiceServer(server, &judgeServer{})
+	judgev1.RegisterJudgeServiceServer(server, &judgeServer{pool: pool, executor: executor})
 	healthv1.RegisterHealthServer(server, healthCheck)
 
 	monitorCtx, stopMonitor := context.WithCancel(ctx)
 	monitorDone := make(chan struct{})
 	go func() {
 		defer close(monitorDone)
-		monitorDependencies(monitorCtx, cfg, pool, docker, healthCheck)
+		monitorDependencies(monitorCtx, cfg, pool, docker, executor, healthCheck)
 	}()
-	defer func() { stopMonitor(); <-monitorDone }()
+	defer func() {
+		cancel()
+		stopMonitor()
+		<-monitorDone
+		healthCheck.Shutdown()
+		executionsStopped := make(chan struct{})
+		go func() { executor.shutdown(); close(executionsStopped) }()
+		serverStopped := make(chan struct{})
+		go func() { server.GracefulStop(); close(serverStopped) }()
+		select {
+		case <-serverStopped:
+		case <-time.After(12 * time.Second):
+			server.Stop()
+			<-serverStopped
+		}
+		<-executionsStopped
+	}()
 
 	serveDone := make(chan error, 1)
 	go func() { serveDone <- server.Serve(listener) }()
-	log.Printf("Judge listening on %s; grading RPCs are not enabled yet.", judgeAddress)
+	log.Printf("Judge listening on %s; check 'run' health before running examples. Durable submissions are not enabled yet.", judgeAddress)
 	select {
 	case err := <-serveDone:
-		if err != nil {
+		if err != nil && !errors.Is(err, grpc.ErrServerStopped) {
 			return errors.New("The judge listener stopped unexpectedly.")
 		}
 	case <-ctx.Done():
-		healthCheck.Shutdown()
-		stopped := make(chan struct{})
-		go func() { server.GracefulStop(); close(stopped) }()
-		select {
-		case <-stopped:
-		case <-time.After(3 * time.Second):
-			server.Stop()
-			<-stopped
-		}
 	}
 	return nil
 }

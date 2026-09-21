@@ -11,7 +11,7 @@ import (
 	healthv1 "google.golang.org/grpc/health/grpc_health_v1"
 )
 
-func monitorDependencies(ctx context.Context, cfg config, pool *pgxpool.Pool, docker *client.Client, healthCheck *health.Server) {
+func monitorDependencies(ctx context.Context, cfg config, pool *pgxpool.Pool, docker *client.Client, executor *executor, healthCheck *health.Server) {
 	previous := make(map[string]bool)
 	update := func(name string, ready bool) {
 		status := healthv1.HealthCheckResponse_NOT_SERVING
@@ -28,6 +28,9 @@ func monitorDependencies(ctx context.Context, cfg config, pool *pgxpool.Pool, do
 	ticker := time.NewTicker(5 * time.Second)
 	defer ticker.Stop()
 	for {
+		if ctx.Err() != nil {
+			return
+		}
 		probe, cancel := context.WithTimeout(ctx, 5*time.Second)
 		neonReady := pool.Ping(probe) == nil
 		cancel()
@@ -36,20 +39,14 @@ func monitorDependencies(ctx context.Context, cfg config, pool *pgxpool.Pool, do
 		probe, cancel = context.WithTimeout(ctx, 5*time.Second)
 		ping, err := docker.Ping(probe, client.PingOptions{NegotiateAPIVersion: true})
 		dockerReady := err == nil && ping.OSType == "linux"
-		imagesReady := dockerReady
-		if dockerReady {
-			for _, name := range []string{cfg.pythonImage, cfg.javascriptImage} {
-				image, err := docker.ImageInspect(probe, name)
-				if err != nil || image.ID == "" || image.Os != "linux" {
-					imagesReady = false
-				}
-			}
-		}
+		imagesReady := dockerReady && executor.refreshImages(probe, cfg)
 		cancel()
 		update("docker", dockerReady)
 		update("images", imagesReady)
-		update("dependencies", neonReady && dockerReady && imagesReady)
-		// The overall judge stays NOT_SERVING until execution and recovery exist.
+		dependenciesReady := neonReady && dockerReady && imagesReady
+		update("dependencies", dependenciesReady)
+		update("run", dependenciesReady && executor.ready())
+		// Overall health stays NOT_SERVING until durable submissions and recovery exist.
 		select {
 		case <-ctx.Done():
 			return

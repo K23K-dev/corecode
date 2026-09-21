@@ -4,7 +4,7 @@ ENV DEBIAN_FRONTEND=noninteractive PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 COPY --from=python:3.12-slim-bookworm /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
 RUN printf 'Acquire::ForceIPv4 "true";\n' > /etc/apt/apt.conf.d/99force-ipv4 \
     && sed -i 's|http://|https://|g' /etc/apt/sources.list.d/debian.sources
-RUN apt-get update && apt-get install -y --no-install-recommends chromium ca-certificates fonts-liberation \
+RUN apt-get update && apt-get install -y --no-install-recommends chromium ca-certificates fonts-liberation coreutils \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /opt/runner
 COPY runner/javascript/package.json ./package.json
