@@ -263,16 +263,30 @@
 .tracker-streaks > div + div svg {
   color: #ffd000;
 }
+.tracker-hearts-help {
+  position: relative;
+  margin-top: 8px;
+}
 .tracker-hearts {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-top: 8px;
+  width: 100%;
   padding: 10px;
   background: #232323;
   border: 1px solid #363636;
   border-radius: 8px;
+  color: #f5f5f5;
+  text-align: left;
+  cursor: pointer;
+}
+.tracker-hearts:hover {
+  border-color: #505050;
+}
+.tracker-hearts:focus-visible {
+  outline: 2px solid #f5f5f5;
+  outline-offset: 3px;
 }
 .tracker-hearts > strong {
   display: flex;
@@ -283,7 +297,7 @@
 .tracker-hearts svg {
   color: #f34f60;
 }
-.tracker-hearts > div {
+.tracker-heart-progress {
   display: grid;
   gap: 5px;
   font-size: 11px;
@@ -308,6 +322,46 @@
 .tracker-hearts progress::-moz-progress-bar {
   background: #f34f60;
   border-radius: 3px;
+}
+.tracker-hearts-popover {
+  position: absolute;
+  top: 100%;
+  inset-inline: 0;
+  z-index: 10;
+  padding-top: 8px;
+}
+.tracker-hearts-tooltip {
+  position: relative;
+  padding: 10px 14px;
+  background: #111;
+  border: 1px solid #383838;
+  color: #f5f5f5;
+  font-size: 12px;
+  line-height: 1.5;
+  font-weight: 500;
+  box-shadow: 0 4px 12px #0003;
+}
+.tracker-hearts-tooltip::before {
+  content: '';
+  position: absolute;
+  top: -5px;
+  left: calc(50% - 4px);
+  width: 8px;
+  height: 8px;
+  background: #111;
+  border-top: 1px solid #383838;
+  border-left: 1px solid #383838;
+  transform: rotate(45deg);
+}
+.tracker-hearts-popover[data-above='true'] {
+  top: auto;
+  bottom: 100%;
+  padding: 0 0 8px;
+}
+.tracker-hearts-popover[data-above='true'] .tracker-hearts-tooltip::before {
+  top: auto;
+  bottom: -5px;
+  transform: rotate(225deg);
 }
 .tracker-repair-dialog {
   padding: 0 25px 21px;

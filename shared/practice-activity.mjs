@@ -1,5 +1,6 @@
 const DAY_MS = 86_400_000;
 const HOUR_MS = 3_600_000;
+export const MAX_STREAK_HEARTS = 3;
 const easternTime = new Intl.DateTimeFormat('en-US', {
   timeZone: 'America/New_York',
   calendar: 'gregory',
@@ -82,11 +83,61 @@ export function practiceClock(now = new Date()) {
   return { today, resetAt: new Date(reset).toISOString() };
 }
 
-/** Count solved dates once; repaired dates preserve continuity but do not earn hearts. */
-export function summarizeActivity(days, repairedDates, today) {
+/** Replay when credits became available, not the calendar day a later repair fills. */
+function heartBalance(events) {
+  const segments = new Map();
+  const solved = new Set();
+  const spent = new Set();
+  let hearts = 0;
+  const root = (segment) => {
+    let current = segment;
+    while (current.parent) current = current.parent;
+    while (segment.parent) {
+      const next = segment.parent;
+      segment.parent = current;
+      segment = next;
+    }
+    return current;
+  };
+  for (const event of [...events].sort(
+    (left, right) => left.at - right.at || Number(left.repair) - Number(right.repair),
+  )) {
+    if (event.repair) {
+      if (spent.has(event.day)) continue;
+      spent.add(event.day);
+      // Historical repairs remain valid even if a newly capped wallet would not
+      // have funded them. They are never refunded when a late solve overlaps.
+      hearts = Math.max(0, hearts - 1);
+    } else {
+      if (solved.has(event.day)) continue;
+      solved.add(event.day);
+    }
+    const neighbors = new Set(
+      [event.day - 1, event.day, event.day + 1]
+        .map((day) => segments.get(day))
+        .filter(Boolean)
+        .map(root),
+    );
+    let before = 0;
+    let count = event.repair ? 0 : 1;
+    for (const segment of neighbors) {
+      before += Math.floor(segment.solved / 5);
+      count += segment.solved;
+    }
+    const merged = { solved: count };
+    for (const segment of neighbors) segment.parent = merged;
+    segments.set(event.day, merged);
+    hearts = Math.min(MAX_STREAK_HEARTS, hearts + Math.floor(count / 5) - before);
+  }
+  return hearts;
+}
+
+/** Count solved dates once; repairs preserve continuity but do not earn a solved day. */
+export function summarizeActivity(days, repairedDates, today, { joinedOn, events } = {}) {
   const todayOrdinal = requireDateOrdinal(today);
   const solved = new Set();
-  let first = null;
+  let first = dateOrdinal(joinedOn);
+  if (first !== null && first > todayOrdinal) first = null;
   for (const day of days) {
     if (!day || !Number.isSafeInteger(day.count) || day.count <= 0) continue;
     const ordinal = dateOrdinal(day.date);
@@ -120,12 +171,23 @@ export function summarizeActivity(days, repairedDates, today) {
   }
   earnedHearts += Math.floor(solvedInRun / 5);
   const isCurrent = previous === todayOrdinal || previous === todayOrdinal - 1;
+  // Date-only callers (calendar fixtures) place repairs after existing activity.
+  // The repository supplies actual receipt/repair instants for the capped wallet.
+  const timeline = events
+    ? events.flatMap((event) => {
+        const day = dateOrdinal(event.date);
+        return day !== null && (event.repair ? repaired.has(day) : solved.has(day))
+          ? [{ day, at: event.at, repair: Boolean(event.repair) }]
+          : [];
+      })
+    : [
+        ...[...solved].map((day) => ({ day, at: day, repair: false })),
+        ...[...repaired].map((day) => ({ day, at: Infinity, repair: true })),
+      ];
   return {
     current: isCurrent ? run : 0,
     best,
-    // A stored repair remains spent if delayed accepted activity later overlaps
-    // it. The accepted day can still earn credit, but does not refund the repair.
-    hearts: Math.max(0, earnedHearts - repaired.size),
+    hearts: heartBalance(timeline),
     earnedHearts,
     heartProgress: isCurrent ? solvedInRun % 5 : 0,
     startedOn: first === null ? null : ordinalKey(first),

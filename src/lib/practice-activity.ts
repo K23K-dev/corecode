@@ -1,4 +1,9 @@
-import { isDateKey, practiceClock, summarizeActivity } from '../../shared/practice-activity.mjs';
+import {
+  isDateKey,
+  MAX_STREAK_HEARTS,
+  practiceClock,
+  summarizeActivity,
+} from '../../shared/practice-activity.mjs';
 
 export type ActivityDay = { date: string; count: number };
 
@@ -36,10 +41,24 @@ export function parseActivity(value: unknown): ActivitySnapshot {
     throw invalid();
   const clock = practiceClock(new Date(activity.serverNow));
   if (clock.today !== activity.today || clock.resetAt !== activity.resetAt) throw invalid();
-  const expected = summarizeActivity(activity.days, activity.repairs, activity.today);
+  if (
+    (activity.streak.startedOn !== null &&
+      (!isDateKey(activity.streak.startedOn) || activity.streak.startedOn > activity.today)) ||
+    !Number.isSafeInteger(activity.streak.hearts) ||
+    activity.streak.hearts < 0 ||
+    activity.streak.hearts > MAX_STREAK_HEARTS
+  )
+    throw invalid();
+  const expected = summarizeActivity(activity.days, activity.repairs, activity.today, {
+    joinedOn: activity.streak.startedOn,
+  });
   for (const key of Object.keys(expected) as (keyof typeof expected)[]) {
+    // Receipt ordering and discarded credits at capacity stay server-side.
+    if (key === 'hearts') continue;
     if (activity.streak[key] !== expected[key]) throw invalid();
   }
+  if (activity.streak.hearts > Math.max(0, expected.earnedHearts - new Set(activity.repairs).size))
+    throw invalid();
   return activity;
 }
 

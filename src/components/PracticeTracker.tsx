@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { BarChart3, Check, ChevronLeft, ChevronRight, Flame, Heart, Trophy, X } from 'lucide-react';
-import { practiceClock } from '../../shared/practice-activity.mjs';
+import { MAX_STREAK_HEARTS, practiceClock } from '../../shared/practice-activity.mjs';
 import type { Exercise } from '../lib/exercises';
 import type { ProgressData } from '../lib/progress';
 import {
@@ -56,6 +56,103 @@ function DayCountdown({
       <span data-testid="tracker-reset-countdown" title="Day resets at 8 PM Eastern time">
         {countdown} left
       </span>
+    </div>
+  );
+}
+
+function StreakHearts({ streak }: { streak?: ActivitySnapshot['streak'] }) {
+  const [open, setOpen] = useState(false);
+  const [above, setAbove] = useState(false);
+  const container = useRef<HTMLDivElement>(null);
+  const popover = useRef<HTMLDivElement>(null);
+  const helpId = useId();
+  const full = streak?.hearts === MAX_STREAK_HEARTS;
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    const place = () => {
+      const anchor = container.current?.getBoundingClientRect();
+      const height = popover.current?.offsetHeight ?? 0;
+      if (anchor)
+        setAbove(anchor.bottom + height > window.innerHeight - 8 && anchor.top >= height + 8);
+    };
+    place();
+    window.addEventListener('resize', place);
+    window.addEventListener('scroll', place, true);
+    return () => {
+      window.removeEventListener('resize', place);
+      window.removeEventListener('scroll', place, true);
+    };
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) return;
+    const dismissOutside = (event: PointerEvent) => {
+      if (!container.current?.contains(event.target as Node)) setOpen(false);
+    };
+    const dismissEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setOpen(false);
+    };
+    document.addEventListener('pointerdown', dismissOutside);
+    document.addEventListener('keydown', dismissEscape);
+    return () => {
+      document.removeEventListener('pointerdown', dismissOutside);
+      document.removeEventListener('keydown', dismissEscape);
+    };
+  }, [open]);
+
+  return (
+    <div
+      className="tracker-hearts-help"
+      ref={container}
+      onPointerEnter={(event) => {
+        if (event.pointerType === 'mouse') setOpen(true);
+      }}
+      onPointerLeave={(event) => {
+        if (event.pointerType === 'mouse' && !container.current?.contains(document.activeElement))
+          setOpen(false);
+      }}
+      onBlur={(event) => {
+        if (!event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+      }}
+    >
+      <button
+        type="button"
+        className="tracker-hearts"
+        aria-label={
+          streak
+            ? `Streak repairs: ${streak.hearts} of ${MAX_STREAK_HEARTS} hearts available. ${full ? 'Maximum reached.' : `${streak.heartProgress} of 5 days toward the next heart.`}`
+            : 'Streak repair rules. Hearts unavailable.'
+        }
+        aria-expanded={open}
+        aria-controls={helpId}
+        aria-describedby={open ? helpId : undefined}
+        onFocus={(event) => {
+          if (event.currentTarget.matches(':focus-visible')) setOpen(true);
+        }}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <strong>
+          <Heart size={17} fill="currentColor" aria-hidden="true" />
+          <span data-testid="tracker-hearts">{streak ? streak.hearts : '—'}</span>
+        </strong>
+        <span className="tracker-heart-progress">
+          <span data-testid="tracker-heart-progress">
+            {full ? 'Max repairs' : `${streak ? `${streak.heartProgress}/5` : '—/5'} to next`}
+          </span>
+          <progress
+            max={5}
+            value={full ? 5 : (streak?.heartProgress ?? 0)}
+            aria-label={full ? 'Maximum repairs stored' : 'Solved days toward next heart'}
+          />
+        </span>
+      </button>
+      <div className="tracker-hearts-popover" ref={popover} data-above={above} hidden={!open}>
+        <div id={helpId} role="tooltip" className="tracker-hearts-tooltip">
+          Repair your streaks. Earn 1 repair per 5-day streak (max of {MAX_STREAK_HEARTS} repairs).
+          Use on any missed day after you joined.
+        </div>
+      </div>
     </div>
   );
 }
@@ -434,28 +531,7 @@ export default function PracticeTracker({
             </strong>
           </div>
         </div>
-        <div className="tracker-hearts">
-          <strong
-            aria-label={
-              streak
-                ? `${streak.hearts} ${streak.hearts === 1 ? 'heart' : 'hearts'} available`
-                : 'Hearts unavailable'
-            }
-          >
-            <Heart size={17} fill="currentColor" aria-hidden="true" />
-            <span data-testid="tracker-hearts">{streak ? streak.hearts : '—'}</span>
-          </strong>
-          <div title="Earn one heart for every five solved days in a streak. Repaired days do not earn hearts.">
-            <span data-testid="tracker-heart-progress">
-              {streak ? `${streak.heartProgress}/5` : '—/5'} to next
-            </span>
-            <progress
-              max={5}
-              value={streak?.heartProgress ?? 0}
-              aria-label="Solved days toward next heart"
-            />
-          </div>
-        </div>
+        <StreakHearts streak={streak} />
       </section>
       {repairDate && (
         <Modal

@@ -68,7 +68,7 @@ const MIGRATION_SQL = `
     problem_version text,
     attempt jsonb NOT NULL,
     grading_source text NOT NULL DEFAULT 'browser' CHECK (grading_source = 'browser'),
-    received_at timestamptz NOT NULL DEFAULT now()
+    received_at timestamptz NOT NULL DEFAULT statement_timestamp()
   );
   CREATE INDEX IF NOT EXISTS cp_submissions_exercise_idx ON cp_submissions(exercise_id, received_at);
   CREATE TABLE IF NOT EXISTS cp_migration_receipts (
@@ -81,7 +81,7 @@ const MIGRATION_SQL = `
   );
   CREATE TABLE IF NOT EXISTS cp_streak_repairs (
     date date PRIMARY KEY CHECK (date BETWEEN DATE '0001-01-01' AND DATE '9999-12-31'),
-    repaired_at timestamptz NOT NULL DEFAULT now()
+    repaired_at timestamptz NOT NULL DEFAULT statement_timestamp()
   );
   CREATE OR REPLACE FUNCTION cp_reject_immutable_change() RETURNS trigger LANGUAGE plpgsql AS $$
   BEGIN
@@ -113,6 +113,17 @@ const MIGRATION_SQL = `
   INSERT INTO cp_schema_migrations(version) VALUES(2) ON CONFLICT DO NOTHING;
   INSERT INTO cp_schema_migrations(version) VALUES(3) ON CONFLICT DO NOTHING;
   INSERT INTO cp_schema_migrations(version) VALUES(4) ON CONFLICT DO NOTHING;
+  ALTER TABLE cp_state ADD COLUMN IF NOT EXISTS joined_at timestamptz;
+  UPDATE cp_state SET joined_at = LEAST(
+    updated_at,
+    (SELECT min(applied_at) FROM cp_schema_migrations),
+    (SELECT min(received_at) FROM cp_submissions)
+  ) WHERE joined_at IS NULL;
+  ALTER TABLE cp_state ALTER COLUMN joined_at SET DEFAULT now();
+  ALTER TABLE cp_state ALTER COLUMN joined_at SET NOT NULL;
+  ALTER TABLE cp_submissions ALTER COLUMN received_at SET DEFAULT statement_timestamp();
+  ALTER TABLE cp_streak_repairs ALTER COLUMN repaired_at SET DEFAULT statement_timestamp();
+  INSERT INTO cp_schema_migrations(version) VALUES(5) ON CONFLICT DO NOTHING;
 `;
 
 export function makePool(connectionString) {
@@ -231,16 +242,19 @@ export async function readState(client) {
   return { ...row, revision: Number(row.revision) };
 }
 
-/** One MVCC snapshot contains only accepted timestamps and immutable repairs, never learner code. */
+/** One MVCC snapshot contains timestamps/statuses and immutable repairs, never learner code. */
 export async function readActivity(pool, now) {
   const {
     rows: [row],
   } = await pool.query(`SELECT
-    COALESCE((SELECT jsonb_agg(attempt->>'at') FROM cp_submissions
-      WHERE attempt->>'status' = 'accepted'
+    COALESCE((SELECT jsonb_agg(jsonb_build_object(
+      'at', attempt->>'at', 'receivedAt', extract(epoch from received_at) * 1000,
+      'accepted', attempt->>'status' = 'accepted'
         AND jsonb_typeof(attempt->'passed') = 'number' AND jsonb_typeof(attempt->'total') = 'number'
-        AND attempt->'passed' = attempt->'total' AND attempt->'total' > '0'::jsonb), '[]'::jsonb) AS timestamps,
-    COALESCE((SELECT jsonb_agg(to_char(date, 'YYYY-MM-DD') ORDER BY date) FROM cp_streak_repairs), '[]'::jsonb) AS repairs`);
+        AND attempt->'passed' = attempt->'total' AND attempt->'total' > '0'::jsonb
+      )) FROM cp_submissions), '[]'::jsonb) AS timestamps,
+    COALESCE((SELECT jsonb_agg(jsonb_build_object('date', to_char(date, 'YYYY-MM-DD'), 'at', extract(epoch from repaired_at) * 1000) ORDER BY repaired_at, date) FROM cp_streak_repairs), '[]'::jsonb) AS repairs,
+    (SELECT joined_at FROM cp_state WHERE profile_id = 1) AS joined_at`);
   // Capture the response clock after database latency, not when the HTTP request began.
   const frozenNow = new Date(now === undefined ? Date.now() : now);
   const clock = practiceClock(frozenNow);
@@ -248,7 +262,12 @@ export async function readActivity(pool, now) {
     throw new Error('Invalid stored activity snapshot.');
   }
   const counts = new Map();
-  for (const at of row.timestamps) {
+  const firstReceipts = new Map();
+  if (!row.joined_at || !Number.isFinite(new Date(row.joined_at).getTime()))
+    throw new Error('Invalid stored profile creation date.');
+  let joinedOn = practiceDateKey(new Date(row.joined_at));
+  for (const record of row.timestamps) {
+    const at = record?.at;
     // Use the same UTC ISO format as saved progress; reject normalized invalid dates and future clock skew.
     if (typeof at !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/.test(at))
       continue;
@@ -267,13 +286,27 @@ export async function readActivity(pool, now) {
       if (error instanceof RangeError) continue;
       throw error;
     }
+    // A failed or imported attempt still proves the profile existed on that day.
+    if (date < joinedOn) joinedOn = date;
+    if (record.accepted !== true) continue;
     counts.set(date, (counts.get(date) ?? 0) + 1);
+    const receivedAt = record.receivedAt;
+    if (!Number.isFinite(receivedAt)) throw new Error('Invalid stored activity receipt.');
+    // Replayed/offline submissions can arrive after a repair. Credit them when
+    // the archive first knew about them, without rewriting earlier wallet caps.
+    const availableAt = Math.max(timestamp.getTime(), receivedAt);
+    firstReceipts.set(date, Math.min(firstReceipts.get(date) ?? Infinity, availableAt));
   }
   const days = [...counts]
     .sort(([left], [right]) => left.localeCompare(right))
     .map(([date, count]) => ({ date, count }));
-  const repairs = row.repairs;
-  if (!repairs.every(isDateKey)) throw new Error('Invalid stored streak repair.');
+  const repairs = row.repairs.map((repair) => repair?.date).sort();
+  if (!repairs.every(isDateKey) || row.repairs.some((repair) => !Number.isFinite(repair.at)))
+    throw new Error('Invalid stored streak repair.');
+  const events = [
+    ...[...firstReceipts].map(([date, at]) => ({ date, at })),
+    ...row.repairs.map(({ date, at }) => ({ date, at, repair: true })),
+  ];
   return {
     timeZone: 'America/New_York',
     resetHour: 20,
@@ -282,7 +315,7 @@ export async function readActivity(pool, now) {
     serverNow: frozenNow.toISOString(),
     days,
     repairs,
-    streak: summarizeActivity(days, repairs, clock.today),
+    streak: summarizeActivity(days, repairs, clock.today, { joinedOn, events }),
   };
 }
 
@@ -311,7 +344,7 @@ export async function repairActivity(pool, value, now) {
         current.days.some((day) => day.date === date)
       ) {
         throw new RequestError(
-          'Choose a missed, completed practice day since your first accepted submission.',
+          'Choose a missed, completed practice day since you joined.',
           400,
           'invalid_repair',
         );
@@ -324,12 +357,7 @@ export async function repairActivity(pool, value, now) {
         );
       }
       await client.query('INSERT INTO cp_streak_repairs(date) VALUES($1::date)', [date]);
-      const repairs = [...current.repairs, date].sort();
-      result = {
-        ...current,
-        repairs,
-        streak: summarizeActivity(current.days, repairs, current.today),
-      };
+      result = await readActivity(client, now);
     }
     await client.query('COMMIT');
     // A slow commit can cross 8 PM. Refresh once on the same released-lock connection,
