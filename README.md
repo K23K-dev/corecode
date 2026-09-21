@@ -4,23 +4,22 @@ A Next.js coding-practice website. Problems, grading cases, and progress live in
 
 ## Run locally
 
-Requires Node.js 22.12+, Go 1.27+, Docker Desktop running, and a private `.env` containing
-`POSTGRES_URL` with `sslmode=require`. Use [.env.example](.env.example) as the template.
+Requires Node.js 22.12+ and a private `.env` with `POSTGRES_URL`, `JUDGE_SANDBOX_NAME`,
+and `JUDGE_TOKEN`. Use [.env.example](.env.example) as the template.
 
 ```sh
 npm install
-npm run runner:setup
 npm run dev
 ```
 
 Open [localhost:5173](http://127.0.0.1:5173). For a built version, run
 `npm run build` followed by `npm start`.
 
-Run `npm run judge:dev` in another terminal for local grading. It reads `.env`
-and listens on `127.0.0.1:50051`. Submissions continue after navigation and save
-history and progress together.
-Use `npm run judge:check` to format-check, vet, and build it. Regenerating bindings
-with `npm run judge:generate` also requires protoc 36.2.
+Both websites use one Go judge in Vercel Sandbox, waking it when needed. Submissions
+live in Neon and save history and progress together. Link the existing Vercel project,
+pull `.env.local` for local Sandbox authentication, then prepare the judge once with
+Go 1.27+ and `npm run judge:setup`. Setup creates the runtime without connecting to Neon.
+Run `npm run check` and `npm run judge:check` to verify changes.
 
 ## Vercel
 
@@ -31,10 +30,14 @@ personal profile. Set these variables in Production only:
 - `POSTGRES_URL`: the existing Neon connection.
 - `APP_ORIGIN=https://corecode-alpha.vercel.app`: update and redeploy if the domain changes.
 - `VERCEL_AUTHENTICATION_CONFIRMED=1`: only after enabling protection.
-- `RUNNER_SANDBOX_SNAPSHOT`: a prepared and verified runner snapshot.
+- `JUDGE_SANDBOX_NAME`: the same prepared sandbox used locally.
+- `JUDGE_TOKEN`: the same private token configured on the judge.
 
-Hosted execution uses Vercel Sandbox, not your Docker Desktop. Snapshot preparation
-uses cloud quota. Preview deployments cannot use the personal data API.
+Vercel provides project-scoped Sandbox authentication automatically. The Go judge
+uses gRPC-Web through Vercel's HTTPS proxy and native gRPC inside the VM. It drains
+after 30 idle seconds; sessions have a four-minute fallback timeout. Interrupted jobs
+recover on the next execution request. Free-tier quotas apply. Preview deployments
+cannot use the personal data API. Never delete/recreate the sandbox while jobs remain.
 
 Apply approved Neon schema updates with `initializeDatabase` in
 `server/repository.mjs` before deploying code that needs them. Vercel deployment

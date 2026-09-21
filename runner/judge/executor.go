@@ -29,13 +29,17 @@ var executionNamePattern = regexp.MustCompile(`^cp-job-[A-Za-z0-9-]{16,64}$`)
 
 // One executor owns capacity for both temporary runs and queued submissions.
 type executor struct {
-	ctx     context.Context
-	docker  *client.Client
-	mu      sync.Mutex
-	images  map[string]string
-	active  int
-	blocked bool
-	work    sync.WaitGroup
+	ctx        context.Context
+	docker     *client.Client
+	mu         sync.Mutex
+	images     map[string]string
+	active     int
+	blocked    bool
+	draining   bool
+	reconciled bool
+	scope      string
+	instance   string
+	work       sync.WaitGroup
 }
 
 type executionSlot struct {
@@ -46,7 +50,7 @@ type executionSlot struct {
 }
 
 func newExecutor(ctx context.Context, docker *client.Client) *executor {
-	return &executor{ctx: ctx, docker: docker, images: make(map[string]string)}
+	return &executor{ctx: ctx, docker: docker, images: make(map[string]string), instance: newJobID()}
 }
 
 func (e *executor) refreshImages(ctx context.Context, cfg config) bool {
@@ -76,21 +80,25 @@ func (e *executor) refreshImages(ctx context.Context, cfg config) bool {
 func (e *executor) ready() bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	return !e.blocked && e.ctx.Err() == nil && len(e.images) != 0
+	return e.runnable() && !e.draining
 }
 
-func (e *executor) shutdown() {
+// Called with e.mu held; existing reservations can finish while admission drains.
+func (e *executor) runnable() bool {
+	return !e.blocked && e.reconciled && e.ctx.Err() == nil && len(e.images) != 0
+}
+
+func (e *executor) beginDrain() {
 	e.mu.Lock()
-	e.blocked = true
+	e.draining = true
 	e.mu.Unlock()
-	e.work.Wait()
 }
 
 func (e *executor) imageFor(runtime string) (string, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	image := e.images[runtime]
-	if e.blocked || e.ctx.Err() != nil || image == "" {
+	if !e.runnable() || e.draining || image == "" {
 		return "", status.Error(codes.Unavailable, "The execution runtime is unavailable.")
 	}
 	return image, nil
@@ -100,7 +108,7 @@ func (e *executor) reserve() (*executionSlot, error) {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	switch {
-	case e.blocked || e.ctx.Err() != nil || len(e.images) == 0:
+	case !e.runnable() || e.draining:
 		return nil, status.Error(codes.Unavailable, "The execution runtime is unavailable.")
 	case e.active >= 2:
 		return nil, status.Error(codes.ResourceExhausted, "Both execution slots are busy. Try again shortly.")
@@ -138,14 +146,6 @@ func (s *executionSlot) finishUnused(cleaned bool) {
 	}
 }
 
-func (e *executor) execute(ctx context.Context, input executionInput) (*judgev1.RunResult, error) {
-	slot, err := e.reserve()
-	if err != nil {
-		return nil, err
-	}
-	return slot.execute(ctx, input)
-}
-
 func (s *executionSlot) execute(ctx context.Context, input executionInput) (result *judgev1.RunResult, err error) {
 	s.mu.Lock()
 	if s.consumed {
@@ -167,7 +167,7 @@ func (s *executionSlot) execute(ctx context.Context, input executionInput) (resu
 	containerID := name
 	creationAttempted, creationUncertain := false, false
 	defer func() {
-		removed := !creationAttempted || e.removeContainer(containerID, name)
+		removed := !creationAttempted || e.removeContainer(context.Background(), containerID, name, false)
 		e.mu.Lock()
 		s.cleaned = removed && !creationUncertain
 		if s.cleaned {
@@ -203,7 +203,10 @@ func (s *executionSlot) execute(ctx context.Context, input executionInput) (resu
 	if runCtx.Err() != nil {
 		return failure(runCtx.Err())
 	}
-	if !e.ready() {
+	e.mu.Lock()
+	runnable := e.runnable()
+	e.mu.Unlock()
+	if !runnable {
 		return nil, status.Error(codes.Unavailable, "The execution runtime is unavailable.")
 	}
 	image := input.imageID
@@ -230,7 +233,10 @@ func (s *executionSlot) execute(ctx context.Context, input executionInput) (resu
 	setupCtx, finishSetup := context.WithTimeout(context.WithoutCancel(runCtx), 10*time.Second)
 	defer finishSetup()
 	creationAttempted = true
-	created, err := e.docker.ContainerCreate(setupCtx, executionContainer(input.runtime, image, name))
+	options := executionContainer(input.runtime, image, name)
+	options.Config.Labels["code-practice.scope"] = e.scope
+	options.Config.Labels["code-practice.instance"] = e.instance
+	created, err := e.docker.ContainerCreate(setupCtx, options)
 	if err != nil {
 		creationUncertain = true
 		return failure(err)
@@ -381,8 +387,8 @@ func executionContainer(runtime, image, name string) client.ContainerCreateOptio
 	}
 }
 
-func (e *executor) removeContainer(id, name string) bool {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+func (e *executor) removeContainer(parent context.Context, id, name string, legacy bool) bool {
+	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
 	defer cancel()
 	for {
 		inspected, err := e.docker.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
@@ -391,7 +397,11 @@ func (e *executor) removeContainer(id, name string) bool {
 		}
 		if err == nil {
 			c := inspected.Container
-			if c.Config == nil || c.Config.Labels["code-practice.execution"] != name || c.Config.Labels["code-practice.judge"] != "1" {
+			if c.Config == nil || c.Name != "/"+name || c.Config.Labels["code-practice.execution"] != name || c.Config.Labels["code-practice.judge"] != "1" || c.Config.Labels["code-practice.runner"] != "1" {
+				return false
+			}
+			scope := c.Config.Labels["code-practice.scope"]
+			if scope != e.scope && !(legacy && scope == "") {
 				return false
 			}
 			// Remove the inspected ID, never a broad label selection or a reused name.
@@ -406,7 +416,8 @@ func (e *executor) removeContainer(id, name string) bool {
 }
 
 func (e *executor) recoverCleanup(name string) bool {
-	removed := executionNamePattern.MatchString(name) && e.removeContainer(name, name)
+	// Only the lease-fenced queue calls this with a recorded attempt name.
+	removed := executionNamePattern.MatchString(name) && e.removeContainer(context.Background(), name, name, true)
 	if !removed {
 		e.mu.Lock()
 		e.blocked = true

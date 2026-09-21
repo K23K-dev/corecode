@@ -36,7 +36,6 @@ export type JobSnapshot = {
   revision: string;
 };
 export type ExecutionOutcome = {
-  durable: boolean;
   result?: RunResult;
   job?: JobSnapshot;
   code?: string;
@@ -137,7 +136,7 @@ export class PracticeRunner {
   private pending: PendingSubmission | null = null;
   private job: JobSnapshot | null = null;
   private receive: OnJob | null = null;
-  private capability: 'durable' | 'synchronous' | null = null;
+  private compatible = false;
 
   constructor(dependencies: Dependencies = {}) {
     this.fetcher = dependencies.fetch ?? globalThis.fetch.bind(globalThis);
@@ -146,7 +145,7 @@ export class PracticeRunner {
     this.id = dependencies.id ?? (() => crypto.randomUUID());
   }
 
-  private async json(url: string, signal: AbortSignal, body?: unknown, timeout = 15_000) {
+  private async json(url: string, signal: AbortSignal, body?: unknown, timeout = 120_000) {
     const response = await this.fetcher(url, {
       method: body === undefined ? 'GET' : 'POST',
       signal: AbortSignal.any([signal, AbortSignal.timeout(timeout)]),
@@ -172,14 +171,13 @@ export class PracticeRunner {
     return { value, status: response.status };
   }
 
-  private async executionMode(signal: AbortSignal) {
-    if (!this.capability) {
-      const { value } = await this.json('/api/health', signal);
-      if (value.executionMode !== 'durable' && value.executionMode !== 'synchronous')
+  private async checkCompatibility(signal: AbortSignal) {
+    if (!this.compatible) {
+      const { value } = await this.json('/api/health', signal, undefined, 15_000);
+      if (value.executionMode !== 'durable')
         throw new Error('Refresh the website before running code.');
-      this.capability = value.executionMode;
+      this.compatible = true;
     }
-    return this.capability;
   }
 
   private save(pending: PendingSubmission, required = false) {
@@ -228,9 +226,9 @@ export class PracticeRunner {
   ): Promise<ExecutionOutcome> {
     const controller = this.begin();
     try {
-      const executionMode = await this.executionMode(controller.signal);
+      await this.checkCompatibility(controller.signal);
       controller.signal.throwIfAborted();
-      if (mode === 'submit' && executionMode === 'durable') {
+      if (mode === 'submit') {
         if (!exercise.version) throw new Error('Refresh this problem before submitting.');
         const existing = pendingSubmissions(this.storage).find(
           (item) => item.problemId === exercise.id && !item.cancelRequested,
@@ -258,11 +256,11 @@ export class PracticeRunner {
           code,
           mode,
         },
-        executionMode === 'durable' ? 45_000 : 165_000,
+        140_000,
       );
       if (status !== 200 || !Array.isArray(value.cases) || value.cases.length > 32)
         throw new Error('Invalid runner response.');
-      return { durable: false, result: value as RunResult, code };
+      return { result: value as RunResult, code };
     } finally {
       this.done(controller);
     }
@@ -335,7 +333,7 @@ export class PracticeRunner {
   async recover(exercise: Exercise, onJob?: OnJob): Promise<ExecutionOutcome | null> {
     const controller = this.begin();
     try {
-      if ((await this.executionMode(controller.signal)) !== 'durable') return null;
+      await this.checkCompatibility(controller.signal);
       controller.signal.throwIfAborted();
       let outcome: ExecutionOutcome | null = null;
       let unresolvedCancellation: Error | null = null;
@@ -414,10 +412,14 @@ export class PracticeRunner {
         onJob?.(next, code);
         if (terminal(next)) finish();
       };
-      const reconnect = (message = 'The submission connection was interrupted.') => {
+      const reconnect = (
+        message = 'The submission connection was interrupted.',
+        planned = false,
+      ) => {
         close();
         if (finished || signal.aborted) return;
-        if (++retries > 5) {
+        if (planned) retries = 0;
+        else if (++retries > 5) {
           finish(
             new Error(`${message} Reopen this problem to reconnect; your submission stays saved.`),
           );
@@ -436,7 +438,7 @@ export class PracticeRunner {
               reconnect(error instanceof Error ? error.message : message);
             }
           },
-          Math.min(1000 * 2 ** (retries - 1), 8000),
+          planned ? 0 : Math.min(1000 * 2 ** (retries - 1), 8000),
         );
       };
       const connect = () => {
@@ -453,6 +455,9 @@ export class PracticeRunner {
         stream.addEventListener('unavailable', () => {
           if (source === stream) reconnect();
         });
+        stream.addEventListener('reconnect', () => {
+          if (source === stream) reconnect(undefined, true);
+        });
         stream.onerror = () => {
           if (source === stream) reconnect();
         };
@@ -466,7 +471,7 @@ export class PracticeRunner {
       }
     });
     this.forget(job.jobId);
-    return { durable: true, job, result: job.result, code };
+    return { job, result: job.result, code };
   }
 
   detach() {

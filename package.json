@@ -14,9 +14,11 @@
     "judge:generate": "node runner/judge/tool.mjs generate",
     "format": "prettier --write \"{src,server,shared,runner}/**/*.{ts,mts,tsx,js,mjs,css}\" next.config.ts package.json tsconfig.json vercel.json",
     "format:check": "prettier --check \"{src,server,shared,runner}/**/*.{ts,mts,tsx,js,mjs,css}\" next.config.ts package.json tsconfig.json vercel.json",
-    "check": "npm run format:check && npm run build"
+    "check": "npm run format:check && npm run build",
+    "judge:setup": "node runner/sandbox/setup.mjs"
   },
   "dependencies": {
+    "@bufbuild/protobuf": "2.15.0",
     "@codemirror/autocomplete": "6.20.3",
     "@codemirror/lang-css": "^6.3.1",
     "@codemirror/lang-html": "^6.4.12",
@@ -27,13 +29,13 @@
     "@codemirror/legacy-modes": "^6.5.4",
     "@codemirror/state": "6.7.4",
     "@codemirror/view": "6.43.11",
+    "@connectrpc/connect": "2.2.0",
+    "@connectrpc/connect-node": "2.2.0",
     "@fontsource/geist": "5.3.0",
-    "@grpc/grpc-js": "1.14.5",
-    "@grpc/proto-loader": "0.8.1",
     "@lezer/highlight": "^1.2.3",
     "@uiw/react-codemirror": "4.25.11",
     "@vercel/functions": "3.9.7",
-    "@vercel/sandbox": "3.2.2",
+    "@vercel/sandbox": "3.3.0",
     "esbuild": "0.27.0",
     "lucide-react": "1.42.0",
     "next": "16.3.5",
@@ -43,6 +45,8 @@
     "server-only": "0.0.1"
   },
   "devDependencies": {
+    "@bufbuild/buf": "1.73.0",
+    "@bufbuild/protoc-gen-es": "2.15.0",
     "@types/node": "^22.15.0",
     "@types/pg": "^8.23.1",
     "@types/react": "^19.2.0",

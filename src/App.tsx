@@ -28,12 +28,7 @@ import Results, {
   type Execution,
 } from './components/Results';
 import type { Exercise } from './lib/exercises';
-import {
-  MAX_ATTEMPTS_PER_EXERCISE,
-  MAX_CODE_BYTES,
-  type Attempt,
-  type ProgressData,
-} from './lib/progress';
+import { MAX_CODE_BYTES, type Attempt, type ProgressData } from './lib/progress';
 import { OUTBOX_PREFIX, type Catalog, type ProgressClient } from './lib/database-client';
 import {
   PracticeRunner,
@@ -308,14 +303,13 @@ function WorkspaceApp({
       setMobilePane('code');
       setNotice('');
       setConsoleOpen(true);
-      let attempt: Attempt | undefined;
       try {
         const outcome = await runner.current.run(exercise, submittedCode, mode, {
           completionIntentIds:
             mode === 'submit' ? client.captureCompletionIntents(exercise.id) : [],
           onJob: (job, savedCode) => showJob(job, ticket, savedCode),
         });
-        if (outcome.durable) {
+        if (outcome.job) {
           await showDurableResult(outcome, ticket);
           if (
             ticket === request.current &&
@@ -331,28 +325,6 @@ function WorkspaceApp({
         const result = outcome.result;
         if (!result) throw new Error('The runner did not return a result.');
         setExecution({ mode, result, code: submittedCode });
-        if (mode === 'submit') {
-          const passed = result.cases.filter((test) => test.passed).length;
-          const total = exercise.cases.length;
-          attempt = {
-            id: crypto.randomUUID(),
-            at: new Date().toISOString(),
-            code: submittedCode,
-            passed,
-            total,
-            problemVersion: exercise.version!,
-            status: result.error ? 'error' : passed === total ? 'accepted' : 'failed',
-            durationMs: result.durationMs,
-          };
-          if (
-            attempt.status === 'accepted' &&
-            total > 0 &&
-            result.cases.length === total &&
-            result.cases.every((test) => test.passed === true && !test.error)
-          ) {
-            setCelebration(ticket);
-          }
-        }
       } catch (reason) {
         if (ticket !== request.current) return;
         setExecution({
@@ -363,27 +335,8 @@ function WorkspaceApp({
       } finally {
         if (ticket === request.current) setRunning(false);
       }
-      if (attempt) {
-        const completed = attempt;
-        setData((previous) => ({
-          ...previous,
-          exercises: {
-            ...previous.exercises,
-            [exercise.id]: {
-              draft: previous.exercises[exercise.id]?.draft ?? submittedCode,
-              updatedAt: completed.at,
-              solved: Boolean(
-                previous.exercises[exercise.id]?.solved || completed.status === 'accepted',
-              ),
-              attempts: [...(previous.exercises[exercise.id]?.attempts ?? []), completed].slice(
-                -MAX_ATTEMPTS_PER_EXERCISE,
-              ),
-            },
-          },
-        }));
-      }
     },
-    [running, recovering, stopping, exercise, code, setData, client, showJob, showDurableResult],
+    [running, recovering, stopping, exercise, code, client, showJob, showDurableResult],
   );
   useEffect(() => {
     const shortcut = (event: KeyboardEvent) => {

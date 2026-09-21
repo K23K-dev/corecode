@@ -1,7 +1,6 @@
 import {
   readActivity,
   readCatalog,
-  readExecutionProblem,
   readPreviewProblem,
   readState,
   repairActivity,
@@ -59,6 +58,8 @@ function executionRequest(value) {
     throw new RequestError('Keep code under 32,768 characters and 50 KiB of valid text.');
   }
   if (submit) {
+    if (!body.submissionId)
+      throw new RequestError('Refresh the website before submitting.', 409, 'refresh_required');
     body.submissionId = jobID(body.submissionId);
     if (!Array.isArray(body.completionIntentIds) || body.completionIntentIds.length > 256) {
       throw new RequestError('Provide at most 256 completion intent IDs.');
@@ -96,20 +97,23 @@ export function createApp({
   hosted = false,
   judge,
   judgeAddress,
-  executeCode = async (...args) => {
-    const { executeSandboxProblem } = await import('../runner/sandbox.mjs');
-    return executeSandboxProblem(...args);
-  },
+  judgeToken,
+  resolveJudgeClient,
 }) {
   const protect = protectRequest(appOrigin, hosted);
-  let localJudge;
+  let transport;
   const getJudge = () => {
-    localJudge ??= judge
+    transport ??= judge
       ? Promise.resolve(judge)
       : import('./judge/adapter.mjs').then(({ createJudgeAdapter }) =>
-          createJudgeAdapter({ address: judgeAddress }),
+          createJudgeAdapter({
+            address: judgeAddress,
+            token: judgeToken,
+            hosted,
+            resolveClient: resolveJudgeClient,
+          }),
         );
-    return localJudge;
+    return transport;
   };
   return async (request) => {
     try {
@@ -119,8 +123,6 @@ export function createApp({
       const jobRoute = /^\/api\/jobs\/([^/]+)(?:\/(events|cancel))?$/.exec(path);
       const methods = jobRoute ? [jobRoute[2] === 'cancel' ? 'POST' : 'GET'] : METHODS[path];
       if (!methods) throw new RequestError('Endpoint not found.', 404, 'not_found');
-      if (hosted && (jobRoute || path === '/api/jobs'))
-        throw new RequestError('Endpoint not found.', 404, 'not_found');
       if (!methods.includes(request.method)) {
         throw new RequestError('Method not allowed.', 405, 'method_not_allowed');
       }
@@ -130,15 +132,15 @@ export function createApp({
       request.signal.throwIfAborted();
       if (jobRoute) {
         const id = jobID(jobRoute[1]);
-        const local = await getJudge();
+        const service = await getJudge();
         request.signal.throwIfAborted();
         if (jobRoute[2] === 'cancel') {
           if (Object.keys(plainObject(body, 'Cancellation request')).length)
             throw new RequestError('Cancellation requires an empty JSON object.');
-          return jsonResponse(await local.cancelJob(id));
+          return jsonResponse(await service.cancelJob(id));
         }
         if (jobRoute[2] === 'events') {
-          return new Response(local.watchJob(id, { signal: request.signal }), {
+          return new Response(service.watchJob(id, { signal: request.signal }), {
             headers: {
               'Content-Type': 'text/event-stream; charset=utf-8',
               'Cache-Control': 'no-store, no-transform',
@@ -147,13 +149,13 @@ export function createApp({
             },
           });
         }
-        return jsonResponse(await local.getJob(id, { signal: request.signal }));
+        return jsonResponse(await service.getJob(id, { signal: request.signal }));
       }
       let result;
       switch (path) {
         case '/api/health':
           await database.query('SELECT 1');
-          result = { ok: true, executionMode: hosted ? 'synchronous' : 'durable' };
+          result = { ok: true, executionMode: 'durable' };
           break;
         case '/api/catalog':
           result = await readCatalog(database);
@@ -180,25 +182,17 @@ export function createApp({
           result = await repairActivity(database, body);
           break;
         case '/api/run': {
-          if (!hosted) {
-            const input = executionRequest(body);
-            const local = await getJudge();
-            request.signal.throwIfAborted();
-            return input.mode === 'submit'
-              ? jsonResponse(await local.submit(input), 202)
-              : jsonResponse(await local.run(input, { signal: request.signal }));
-          }
-          const problem = await readExecutionProblem(database, body?.problemId);
-          // Next aborts the request signal when its client disconnects. A pending
-          // database read must not start a runner after the user has pressed Stop.
+          const input = executionRequest(body);
+          const service = await getJudge();
           request.signal.throwIfAborted();
-          result = await executeCode(body, problem, { signal: request.signal });
-          break;
+          return input.mode === 'submit'
+            ? jsonResponse(await service.submit(input), 202)
+            : jsonResponse(await service.run(input, { signal: request.signal }));
         }
         case '/api/jobs': {
           const params = jobList(url.searchParams);
-          const local = await getJudge();
-          result = await local.listJobs(params, { signal: request.signal });
+          const service = await getJudge();
+          result = await service.listJobs(params, { signal: request.signal });
           break;
         }
       }

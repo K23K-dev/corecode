@@ -1,6 +1,6 @@
 export function createApiHandler(options?: {
   environment?: Record<string, string | undefined>;
-  executeCode?: (...args: any[]) => Promise<unknown>;
+  keepAlive?: (task: Promise<unknown>) => void;
 }): (request: Request) => Promise<Response>;
 
 export function readVercelConfiguration(environment?: Record<string, string | undefined>): {

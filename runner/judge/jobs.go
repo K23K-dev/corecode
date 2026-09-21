@@ -39,7 +39,7 @@ const jobColumns = `id::text, problem_id, problem_version, state, created_at,
 	started_at, finished_at, result, error, revision, request_fingerprint`
 
 const queueSchemaReady = `to_regprocedure('cp_finish_execution(uuid,uuid,jsonb,text,boolean)') IS NOT NULL
-	AND EXISTS (SELECT 1 FROM cp_schema_migrations WHERE version = 7)`
+	AND EXISTS (SELECT 1 FROM cp_schema_migrations WHERE version = 8)`
 
 func submissionFingerprint(request *judgev1.SubmitRequest) string {
 	data, _ := json.Marshal(struct {

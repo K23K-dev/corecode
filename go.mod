@@ -3,6 +3,7 @@ module github.com/K23K-dev/corecode
 go 1.27.0
 
 require (
+	connectrpc.com/connect v1.21.0
 	github.com/containerd/errdefs v1.0.0
 	github.com/jackc/pgx/v5 v5.11.0
 	github.com/moby/moby/api v1.56.0

@@ -51,6 +51,18 @@ func monitorDependencies(ctx context.Context, cfg config, pool *pgxpool.Pool, do
 		queueReady = queueReady && schemaErr == nil
 		update("queue", queueReady)
 		dependenciesReady := neonReady && dockerReady && imagesReady && queueReady
+		cleanupReady := false
+		if dependenciesReady {
+			probe, cancel = context.WithTimeout(ctx, 15*time.Second)
+			cleanupReady = executor.reconcile(probe, pool)
+			cancel()
+		} else {
+			executor.mu.Lock()
+			executor.reconciled = false
+			executor.mu.Unlock()
+		}
+		update("recovery", cleanupReady)
+		dependenciesReady = dependenciesReady && cleanupReady
 		update("dependencies", dependenciesReady)
 		update("run", dependenciesReady && executor.ready())
 		update("submissions", dependenciesReady && executor.ready())

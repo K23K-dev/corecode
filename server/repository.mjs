@@ -335,6 +335,11 @@ const MIGRATION_SQL = `
   END;
   $$;
   INSERT INTO cp_schema_migrations(version) VALUES(7) ON CONFLICT DO NOTHING;
+  CREATE TABLE IF NOT EXISTS cp_judge_runtime (
+    id smallint PRIMARY KEY CHECK (id = 1),
+    engine_id text NOT NULL CHECK (length(engine_id) BETWEEN 1 AND 256)
+  );
+  INSERT INTO cp_schema_migrations(version) VALUES(8) ON CONFLICT DO NOTHING;
 `;
 
 export function makePool(connectionString) {
@@ -415,30 +420,6 @@ export async function readPreviewProblem(pool, problemId, problemVersion) {
     );
   }
   return { ...row.content, id, version: row.version };
-}
-
-/** Private execution lookup. Never include this result in public catalog/state routes. */
-export async function readExecutionProblem(pool, problemId) {
-  const id = identifier(problemId, 'Problem ID');
-  const {
-    rows: [row],
-  } = await pool.query(
-    `SELECT p.id, p.current_version AS version,
-      s.content AS "gradingSpec", s.spec_version AS "gradingSpecVersion"
-     FROM cp_problems p
-     LEFT JOIN cp_grading_specs s ON s.exercise_id = p.id AND s.problem_version = p.current_version
-     WHERE p.id = $1 AND p.active`,
-    [id],
-  );
-  if (!row) return null;
-  if (row.gradingSpec && digest(row.gradingSpec) !== row.gradingSpecVersion) {
-    throw new RequestError(
-      'Grading data is unavailable for this problem version.',
-      503,
-      'grading_unavailable',
-    );
-  }
-  return { id: row.id, version: row.version, gradingSpec: row.gradingSpec };
 }
 
 export async function readState(client) {

@@ -1,43 +1,38 @@
-import { status } from '@grpc/grpc-js';
+import { Code } from '@connectrpc/connect';
 import { RequestError } from '../validation.mjs';
 
-const states = Object.fromEntries(
-  ['queued', 'running', 'canceling', 'completed', 'failed', 'canceled'].map((state) => [
-    `JOB_STATE_${state.toUpperCase()}`,
-    state,
-  ]),
-);
+const states = ['', 'queued', 'running', 'canceling', 'completed', 'failed', 'canceled'];
 
 function judgeError(error) {
   if (error instanceof RequestError) return error;
   const mapped = {
-    [status.INVALID_ARGUMENT]: [400, 'invalid_request', 'The execution request is invalid.'],
-    [status.NOT_FOUND]: [404, 'not_found', 'The problem or submission was not found.'],
-    [status.ALREADY_EXISTS]: [
+    [Code.InvalidArgument]: [400, 'invalid_request', 'The execution request is invalid.'],
+    [Code.NotFound]: [404, 'not_found', 'The problem or submission was not found.'],
+    [Code.AlreadyExists]: [
       409,
       'submission_conflict',
       'That submission ID belongs to different input. Check its saved result before retrying.',
     ],
-    [status.FAILED_PRECONDITION]: [
+    [Code.FailedPrecondition]: [
       409,
       'problem_changed',
       'The problem or grading setup changed. Refresh before trying again.',
     ],
-    [status.RESOURCE_EXHAUSTED]: [
+    [Code.ResourceExhausted]: [
       429,
       'runner_busy',
       'Execution slots are busy or submissions are waiting. Try again shortly.',
     ],
-    [status.CANCELLED]: [499, 'canceled', 'The execution request was canceled.'],
-    [status.DEADLINE_EXCEEDED]: [
+    [Code.Canceled]: [499, 'canceled', 'The execution request was canceled.'],
+    [Code.DeadlineExceeded]: [
       504,
       'judge_timeout',
       'The judge did not respond in time. Check the submission status before retrying.',
     ],
-  }[error?.code] ?? [
+  }[error?.name === 'AbortError' ? Code.Canceled : error?.code] ?? [
     503,
     'judge_unavailable',
-    'The local judge is unavailable. Start it and try again.',
+    'The judge is unavailable. Try again shortly or check its server configuration.',
   ];
   return new RequestError(mapped[2], mapped[0], mapped[1]);
 }
@@ -75,42 +70,30 @@ function snapshot(value) {
   };
 }
 
-/** A shared local transport. Hosted execution never creates this adapter. */
-export async function createJudgeAdapter({ address, client } = {}) {
-  const transport = client ?? (await import('./client.ts')).createJudgeClient(address);
-  const service = transport.service;
-  function unary(method, request, timeout, signal) {
-    return new Promise((resolve, reject) => {
-      if (signal?.aborted) return reject(judgeError({ code: status.CANCELLED }));
-      let call,
-        finished = false;
-      const cancel = () => call?.cancel();
-      try {
-        call = service[method](request, { deadline: Date.now() + timeout }, (error, value) => {
-          finished = true;
-          signal?.removeEventListener('abort', cancel);
-          if (error) reject(judgeError(error));
-          else if (!value) reject(judgeError());
-          else resolve(value);
-        });
-      } catch (error) {
-        reject(judgeError(error));
-        return;
-      }
-      if (!finished) {
-        signal?.addEventListener('abort', cancel, { once: true });
-        if (signal?.aborted) cancel();
-      }
-    });
+/** Resolve the current Sandbox session per operation, while keeping one grading API. */
+export async function createJudgeAdapter({ address, token, hosted, client, resolveClient } = {}) {
+  const direct =
+    client ??
+    (resolveClient
+      ? undefined
+      : (await import('./client.ts')).createJudgeClient(address, { token, hosted }));
+  const transport = resolveClient ?? (() => direct);
+  async function unary(method, request, timeoutMs, signal) {
+    try {
+      signal?.throwIfAborted();
+      const connection = await transport({ signal });
+      signal?.throwIfAborted();
+      return await connection.service[method](request, { timeoutMs, signal });
+    } catch (error) {
+      throw judgeError(error);
+    }
   }
-
   return {
     async run(request, { signal } = {}) {
       return result(await unary('run', request, 40_000, signal));
     },
     async submit(request) {
-      // Once dispatched, acceptance survives browser disconnects. The same UUID
-      // lets the browser resolve a lost response without creating another job.
+      // Acceptance survives browser disconnects; retries reuse the same UUID.
       return snapshot(await unary('submit', request, 10_000));
     },
     async getJob(jobId, { signal } = {}) {
@@ -124,15 +107,18 @@ export async function createJudgeAdapter({ address, client } = {}) {
       return snapshot(await unary('cancelJob', { jobId }, 10_000));
     },
     watchJob(jobId, { signal } = {}) {
-      let call, controller, heartbeat;
-      let closed = false;
+      const abort = new AbortController();
       const encoder = new TextEncoder();
+      let controller, heartbeat, rotation, resume;
+      let closed = false;
       const stop = () => {
         if (closed) return;
         closed = true;
         clearInterval(heartbeat);
+        clearTimeout(rotation);
         signal?.removeEventListener('abort', finish);
-        call?.cancel();
+        abort.abort();
+        resume?.();
       };
       const finish = () => {
         if (closed) return;
@@ -143,49 +129,56 @@ export async function createJudgeAdapter({ address, client } = {}) {
         if (!closed)
           controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(value)}\n\n`));
       };
-      const fail = (cause) => {
-        if (closed) return;
-        const error = judgeError(cause);
-        send('unavailable', { error: error.message, code: error.code });
-        finish();
-      };
+      async function observe() {
+        try {
+          const connection = await transport({ signal: abort.signal });
+          if (closed) return;
+          for await (const value of connection.service.watchJob(
+            { jobId },
+            { timeoutMs: 70_000, signal: abort.signal },
+          )) {
+            if (closed) break;
+            send('snapshot', snapshot(value));
+            if (controller.desiredSize <= 0)
+              await new Promise((resolve) => {
+                resume = resolve;
+              });
+          }
+          finish();
+        } catch (cause) {
+          if (closed) return;
+          const error = judgeError(cause);
+          send('unavailable', { error: error.message, code: error.code });
+          finish();
+        }
+      }
       return new ReadableStream({
         start(stream) {
           controller = stream;
           if (signal?.aborted) return finish();
           signal?.addEventListener('abort', finish, { once: true });
-          try {
-            call = service.watchJob({ jobId }, { deadline: Date.now() + 5 * 60_000 });
-            call.on('data', (value) => {
-              if (closed) return;
-              try {
-                send('snapshot', snapshot(value));
-                if (controller.desiredSize <= 0) call.pause();
-              } catch (error) {
-                fail(error);
-              }
-            });
-            call.on('error', fail);
-            call.on('end', finish);
-            heartbeat = setInterval(() => {
-              if (!closed && controller.desiredSize > 0)
-                controller.enqueue(encoder.encode(': keepalive\n\n'));
-            }, 15_000);
-            heartbeat.unref?.();
-          } catch (error) {
-            fail(error);
-          }
+          heartbeat = setInterval(() => {
+            if (!closed && controller.desiredSize > 0)
+              controller.enqueue(encoder.encode(': keepalive\n\n'));
+          }, 15_000);
+          heartbeat.unref?.();
+          // A planned rotation keeps healthy observations within Function duration.
+          rotation = setTimeout(() => {
+            send('reconnect', {});
+            finish();
+          }, 60_000);
+          rotation.unref?.();
+          void observe();
         },
         pull() {
-          call?.resume();
+          resume?.();
+          resume = undefined;
         },
-        cancel() {
-          stop();
-        },
+        cancel: stop,
       });
     },
     close() {
-      transport.close();
+      direct?.close();
     },
   };
 }

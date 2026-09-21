@@ -1,52 +1,71 @@
 import 'server-only';
-import { resolve } from 'node:path';
-import { credentials, loadPackageDefinition } from '@grpc/grpc-js';
-import { loadSync } from '@grpc/proto-loader';
-import type { ProtoGrpcType as JudgeProto } from './gen/judge.js';
-import type { ProtoGrpcType as HealthProto } from './gen/health.js';
-import type { HealthCheckResponse__Output } from './gen/grpc/health/v1/HealthCheckResponse.js';
+import { Agent } from 'node:https';
+import { createClient, type Interceptor } from '@connectrpc/connect';
+import {
+  createGrpcTransport,
+  createGrpcWebTransport,
+  Http2SessionManager,
+} from '@connectrpc/connect-node';
+import { readJudgeConfiguration } from './config.mjs';
+import { JudgeService } from './gen/judge_pb';
+import { Health, HealthCheckResponse_ServingStatus } from './gen/grpc/health/v1/health_pb';
 
-const protoDirectory = resolve(process.cwd(), 'runner/proto');
-const definitions = loadSync(['judge.proto', 'grpc/health/v1/health.proto'], {
-  includeDirs: [protoDirectory],
-  longs: String,
-  enums: String,
-  defaults: true,
-});
-const protocol = loadPackageDefinition(definitions) as unknown as JudgeProto & HealthProto;
-
-/** Internal transport for local website execution; hosted requests use Sandbox. */
-export function createJudgeClient(address = process.env.JUDGE_ADDRESS ?? '127.0.0.1:50051') {
-  const match = /^(?:127\.0\.0\.1|localhost|\[::1\]):([0-9]+)$/.exec(address);
-  if (!match || Number(match[1]) < 1 || Number(match[1]) > 65535) {
-    throw new Error('JUDGE_ADDRESS must be a loopback host and port.');
+/** Native gRPC locally; gRPC-Web crosses Sandbox's HTTPS proxy. */
+export function createJudgeClient(
+  address = process.env.JUDGE_ADDRESS,
+  {
+    token = process.env.JUDGE_TOKEN,
+    hosted = process.env.VERCEL === '1',
+    protocol = 'grpc',
+  }: { token?: string; hosted?: boolean; protocol?: 'grpc' | 'grpc-web' } = {},
+) {
+  let baseUrl: string;
+  if (protocol === 'grpc-web') {
+    const url = new URL(address ?? '');
+    if (
+      url.protocol !== 'https:' ||
+      url.username ||
+      url.password ||
+      url.pathname !== '/' ||
+      url.search ||
+      url.hash
+    )
+      throw new Error('The Sandbox judge must use an HTTPS origin.');
+    readJudgeConfiguration({ address: `${url.hostname}:${url.port || 443}`, token, hosted: true });
+    baseUrl = url.origin;
+  } else {
+    const config = readJudgeConfiguration({ address, token, hosted });
+    baseUrl = `${config.tls ? 'https' : 'http'}://${config.address}`;
   }
-
-  const options = {
-    'grpc.max_send_message_length': 1024 * 1024,
-    'grpc.max_receive_message_length': 1024 * 1024,
+  const authorize: Interceptor = (next) => (request) => {
+    request.header.set('authorization', `Bearer ${token}`);
+    return next(request);
   };
-  const service = new protocol.corecode.judge.v1.JudgeService(
-    address,
-    credentials.createInsecure(),
-    options,
-  );
-  const health = new protocol.grpc.health.v1.Health(address, credentials.createInsecure(), options);
-
+  const options = {
+    baseUrl,
+    readMaxBytes: 1024 * 1024,
+    writeMaxBytes: 1024 * 1024,
+    interceptors: [authorize],
+  };
+  const session =
+    protocol === 'grpc'
+      ? new Http2SessionManager(baseUrl, { idleConnectionTimeoutMs: 60_000 })
+      : undefined;
+  const agent = protocol === 'grpc-web' ? new Agent({ keepAlive: true }) : undefined;
+  const transport =
+    protocol === 'grpc-web'
+      ? createGrpcWebTransport({ ...options, httpVersion: '1.1', nodeOptions: { agent } })
+      : createGrpcTransport({ ...options, sessionManager: session });
+  const health = createClient(Health, transport);
   return {
-    service,
-    checkHealth(serviceName = '') {
-      return new Promise<HealthCheckResponse__Output['status']>((resolve, reject) => {
-        health.check({ service: serviceName }, { deadline: Date.now() + 2000 }, (error, reply) => {
-          if (error) reject(error);
-          else if (!reply) reject(new Error('The judge returned no health status.'));
-          else resolve(reply.status);
-        });
-      });
+    service: createClient(JudgeService, transport),
+    async checkHealth(service = '') {
+      const response = await health.check({ service }, { timeoutMs: 2000 });
+      return HealthCheckResponse_ServingStatus[response.status];
     },
     close() {
-      service.close();
-      health.close();
+      session?.abort();
+      agent?.destroy();
     },
   };
 }

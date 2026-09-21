@@ -12,25 +12,36 @@ const environment = { ...process.env };
 const pathKey = Object.keys(environment).find((key) => key.toLowerCase() === 'path');
 const systemPath = environment[pathKey] ?? '';
 if (pathKey) delete environment[pathKey];
-environment.PATH = [join(tools, 'go', 'bin'), join(tools, 'protobuf', 'bin'), bin, systemPath].join(
-  delimiter,
-);
+environment.PATH = [join(tools, 'go', 'bin'), bin, systemPath].join(delimiter);
 
-async function run(command, args, capture = false) {
+async function run(command, args, { capture = false, parentStdin = false } = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(command, args, {
       cwd: root,
       env: environment,
       windowsHide: true,
-      stdio: capture ? ['ignore', 'pipe', 'inherit'] : 'inherit',
+      stdio: parentStdin
+        ? ['pipe', 'inherit', 'inherit']
+        : capture
+          ? ['ignore', 'pipe', 'inherit']
+          : 'inherit',
     });
-    const interrupt = () => child.kill('SIGINT');
-    const terminate = () => child.kill('SIGTERM');
+    let shutdownTimer;
+    const stop = (signal) => {
+      if (parentStdin) {
+        child.stdin.end();
+        shutdownTimer ??= setTimeout(() => child.kill('SIGKILL'), 35_000);
+      } else child.kill(signal);
+    };
+    child.stdin?.on('error', () => {});
+    const interrupt = () => stop('SIGINT');
+    const terminate = () => stop('SIGTERM');
     process.on('SIGINT', interrupt);
     process.on('SIGTERM', terminate);
     const detach = () => {
       process.off('SIGINT', interrupt);
       process.off('SIGTERM', terminate);
+      clearTimeout(shutdownTimer);
     };
     let output = '';
     child.stdout?.on('data', (chunk) => {
@@ -38,7 +49,7 @@ async function run(command, args, capture = false) {
     });
     child.once('error', () => {
       detach();
-      reject(Error(`Cannot start ${command}. Install Go and protoc or use .local/tools.`));
+      reject(Error(`Cannot start ${command}. Install Go or use .local/tools/go.`));
     });
     child.once('exit', (code, signal) => {
       detach();
@@ -48,9 +59,9 @@ async function run(command, args, capture = false) {
   });
 }
 
-async function build() {
+async function build(target = executable) {
   mkdirSync(join(root, 'build'), { recursive: true });
-  await run('go', ['build', '-o', executable, './runner/judge']);
+  await run('go', ['build', '-o', target, './runner/judge']);
 }
 
 try {
@@ -62,13 +73,17 @@ try {
       for (const [key, value] of Object.entries(process.env)) {
         if (key.toLowerCase() !== 'path') environment[key] = value;
       }
-      await run(executable, []);
+      await run(executable, ['--parent-stdin'], { parentStdin: true });
       break;
     case 'build':
       await build();
       break;
+    case 'build-linux':
+      Object.assign(environment, { GOOS: 'linux', GOARCH: 'amd64', CGO_ENABLED: '0' });
+      await build(join(root, 'build', 'judge-linux-amd64'));
+      break;
     case 'check': {
-      const unformatted = await run('gofmt', ['-l', 'runner/judge'], true);
+      const unformatted = await run('gofmt', ['-l', 'runner/judge'], { capture: true });
       if (unformatted.trim()) throw Error(`Run gofmt on:\n${unformatted.trim()}`);
       await run('go', ['vet', './runner/judge/...']);
       await build();
@@ -79,29 +94,27 @@ try {
       environment.GOBIN = bin;
       await run('go', ['install', 'google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12']);
       await run('go', ['install', 'google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.2']);
-      await run('protoc', [
-        '-I',
-        'runner/proto',
-        '--go_out=.',
-        '--go_opt=module=github.com/K23K-dev/corecode',
-        '--go-grpc_out=.',
-        '--go-grpc_opt=module=github.com/K23K-dev/corecode',
-        'judge.proto',
-      ]);
       await run(process.execPath, [
-        'node_modules/@grpc/proto-loader/build/bin/proto-loader-gen-types.js',
-        '--longs=String',
-        '--enums=String',
-        '--defaults',
-        '--includeComments',
-        '--grpcLib=@grpc/grpc-js',
-        '--outDir=server/judge/gen',
-        '--importFileExtension=.js',
-        '-I',
+        'node_modules/@bufbuild/buf/bin/buf',
+        'generate',
         'runner/proto',
-        '--',
-        'judge.proto',
-        'grpc/health/v1/health.proto',
+        '--template',
+        JSON.stringify({
+          version: 'v2',
+          plugins: [
+            ...['go', 'go-grpc'].map((plugin) => ({
+              local: join(bin, `protoc-gen-${plugin}${process.platform === 'win32' ? '.exe' : ''}`),
+              out: '.',
+              opt: 'module=github.com/K23K-dev/corecode',
+              types: ['corecode.judge.v1.JudgeService'],
+            })),
+            {
+              local: [process.execPath, 'node_modules/@bufbuild/protoc-gen-es/bin/protoc-gen-es'],
+              out: 'server/judge/gen',
+              opt: 'target=ts',
+            },
+          ],
+        }),
       ]);
       await run(process.execPath, [
         'node_modules/prettier/bin/prettier.cjs',
@@ -110,7 +123,7 @@ try {
       ]);
       break;
     default:
-      throw Error('Use judge:dev, judge:build, judge:check, or judge:generate.');
+      throw Error('Use judge:dev, judge:build, judge:check, judge:generate, or build-linux.');
   }
 } catch (error) {
   console.error(error.message);

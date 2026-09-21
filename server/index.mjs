@@ -3,6 +3,7 @@ import { createApp } from './app.mjs';
 import { getDatabaseConnection } from './database-config.mjs';
 import { checkedHostedOrigin, errorResponse, jsonResponse } from './http.mjs';
 import { initializeDatabase, makePool } from './repository.mjs';
+import { readExecutionConfiguration } from './judge/config.mjs';
 
 /** No connection is opened until the deployment's private configuration is checked. */
 export function readVercelConfiguration(environment = process.env) {
@@ -23,7 +24,7 @@ export function readVercelConfiguration(environment = process.env) {
 }
 
 /** Lazy and shared per warm function; building Next never connects or seeds content. */
-export function createApiHandler({ environment = process.env, executeCode, judge } = {}) {
+export function createApiHandler({ environment = process.env, judge, keepAlive } = {}) {
   let app;
   return async (request) => {
     if (!app) {
@@ -35,12 +36,27 @@ export function createApiHandler({ environment = process.env, executeCode, judge
               appOrigin: 'http://127.0.0.1:5173',
               ...getDatabaseConnection(environment),
             };
+        const execution = judge ? undefined : readExecutionConfiguration(environment, hosted);
+        let resolveJudgeClient;
+        if (execution?.name) {
+          const { createSandboxJudgeResolver, sandboxCredentials } =
+            await import('./judge/sandbox.mjs');
+          resolveJudgeClient = createSandboxJudgeResolver({
+            name: execution.name,
+            token: execution.token,
+            databaseURL: configuration.connectionString,
+            credentials: sandboxCredentials(environment),
+            keepAlive,
+          });
+        }
         let ready;
         app = createApp({
           appOrigin: configuration.appOrigin,
           hosted,
           judge,
-          judgeAddress: environment.JUDGE_ADDRESS ?? '127.0.0.1:50051',
+          judgeAddress: execution?.address,
+          judgeToken: execution?.token,
+          resolveJudgeClient,
           getPool: () => {
             ready ??= (async () => {
               // Local schema-only setup replaces the former custom dev launcher.
@@ -55,19 +71,13 @@ export function createApiHandler({ environment = process.env, executeCode, judge
             });
             return ready;
           },
-          executeCode:
-            executeCode ??
-            (async (...args) => {
-              const { executeSandboxProblem } = await import('../runner/sandbox.mjs');
-              return executeSandboxProblem(...args);
-            }),
         });
       } catch (error) {
         if (!hosted) return errorResponse(error, request.method === 'HEAD');
         return jsonResponse(
           {
             error:
-              'Production setup is incomplete. Check deployment protection, POSTGRES_URL, and the configured application origin.',
+              'Production setup is incomplete. Check deployment protection, database, application origin, and judge configuration.',
             code: 'deployment_not_configured',
           },
           503,

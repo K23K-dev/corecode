@@ -17,14 +17,15 @@ import (
 // Admission serializes queue acceptance, claims, and temporary Run reservations.
 // Execution and lease renewal happen outside that lock.
 type jobQueue struct {
-	ctx       context.Context
-	store     *jobStore
-	executor  *executor
-	admission sync.Mutex
-	mu        sync.Mutex
-	active    map[string]context.CancelFunc
-	wake      chan struct{}
-	workers   sync.WaitGroup
+	ctx        context.Context
+	store      *jobStore
+	executor   *executor
+	admission  sync.Mutex
+	mu         sync.Mutex
+	active     map[string]context.CancelFunc
+	wake       chan struct{}
+	workers    sync.WaitGroup
+	recovering bool
 }
 
 func newJobQueue(ctx context.Context, store *jobStore, executor *executor) *jobQueue {
@@ -38,19 +39,40 @@ func (q *jobQueue) notify() {
 	}
 }
 
+func (q *jobQueue) beginDrain() {
+	q.admission.Lock()
+	defer q.admission.Unlock()
+	q.executor.beginDrain()
+}
+
+func (q *jobQueue) wait() {
+	q.workers.Wait()
+	q.executor.work.Wait()
+}
+
 func (q *jobQueue) run(ctx context.Context, request *judgev1.RunRequest) (*judgev1.RunResult, error) {
 	input, err := prepareExecution(ctx, q.store.pool, request, "example")
 	if err != nil {
 		return nil, err
 	}
 	q.admission.Lock()
+	q.mu.Lock()
+	recovering := q.recovering
+	q.mu.Unlock()
+	if recovering {
+		q.admission.Unlock()
+		return nil, status.Error(codes.Unavailable, "An interrupted execution is being cleaned up. Try again shortly.")
+	}
 	pending, err := q.store.hasPending(ctx, q.activeIDs())
 	var slot *executionSlot
 	if err == nil {
 		if pending {
 			err = status.Error(codes.ResourceExhausted, "Submissions are waiting. Try Run again shortly.")
 		} else {
-			slot, err = q.executor.reserve()
+			input.imageID, err = q.executor.imageFor(input.runtime)
+			if err == nil {
+				slot, err = q.executor.reserve()
+			}
 		}
 	}
 	q.admission.Unlock()
@@ -83,6 +105,12 @@ func (q *jobQueue) serve() {
 func (q *jobQueue) dispatch() bool {
 	q.admission.Lock()
 	defer q.admission.Unlock()
+	q.mu.Lock()
+	recovering := q.recovering
+	q.mu.Unlock()
+	if recovering {
+		return false
+	}
 	slot, err := q.executor.reserve()
 	if err != nil {
 		return false
@@ -98,6 +126,7 @@ func (q *jobQueue) dispatch() bool {
 	ctx, cancel = context.WithCancel(q.ctx)
 	q.mu.Lock()
 	q.active[job.id] = cancel
+	q.recovering = job.recovery
 	q.mu.Unlock()
 	q.workers.Add(1)
 	go func() {
@@ -106,6 +135,9 @@ func (q *jobQueue) dispatch() bool {
 		defer func() {
 			q.mu.Lock()
 			delete(q.active, job.id)
+			if job.recovery {
+				q.recovering = false
+			}
 			q.mu.Unlock()
 			q.notify()
 		}()

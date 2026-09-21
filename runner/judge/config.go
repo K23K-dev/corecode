@@ -7,17 +7,21 @@ import (
 	"os"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type config struct {
 	database        *pgxpool.Config
+	leader          *pgx.ConnConfig
 	dockerHost      string
 	pythonImage     string
 	javascriptImage string
+	sandboxDeadline time.Time
 }
 
 func loadConfig() (config, error) {
@@ -25,16 +29,69 @@ func loadConfig() (config, error) {
 	if err != nil {
 		return config{}, err
 	}
+	leader, err := leaderDatabaseConfig(os.Getenv("POSTGRES_URL"))
+	if err != nil {
+		return config{}, err
+	}
 	dockerHost := "unix:///var/run/docker.sock"
 	if runtime.GOOS == "windows" {
 		dockerHost = "npipe:////./pipe/dockerDesktopLinuxEngine"
 	}
+	dockerHost = configuredValue("DOCKER_HOST", dockerHost)
+	if !localDockerHost(dockerHost) {
+		return config{}, errors.New("DOCKER_HOST must address this computer's Docker engine; remote Docker engines are not supported.")
+	}
+	var deadline time.Time
+	if value := os.Getenv("JUDGE_SANDBOX_DEADLINE"); value != "" {
+		milliseconds, err := strconv.ParseInt(value, 10, 64)
+		deadline = time.UnixMilli(milliseconds)
+		if err != nil || time.Until(deadline) < 5*time.Second || time.Until(deadline) > 3*time.Minute {
+			return config{}, errors.New("The Sandbox drain deadline must be within the next three minutes.")
+		}
+	}
 	return config{
 		database:        database,
-		dockerHost:      configuredValue("DOCKER_HOST", dockerHost),
+		leader:          leader,
+		dockerHost:      dockerHost,
 		pythonImage:     configuredValue("JUDGE_PYTHON_IMAGE", "cp-practice-python:2"),
 		javascriptImage: configuredValue("JUDGE_JAVASCRIPT_IMAGE", "coding-practice-js:2"),
+		sandboxDeadline: deadline,
 	}, nil
+}
+
+// Session advisory locks require a direct connection. Reparse the normalized
+// URL so TLS server names and SSL fallback configuration match that endpoint.
+func leaderDatabaseConfig(value string) (*pgx.ConnConfig, error) {
+	u, err := url.Parse(strings.TrimSpace(value))
+	if err != nil {
+		return nil, errors.New("Cannot configure the judge's direct Neon connection.")
+	}
+	u.Host = net.JoinHostPort(strings.Replace(strings.ToLower(u.Hostname()), "-pooler.", ".", 1), "5432")
+	direct, err := databaseConfig(u.String())
+	if err != nil {
+		return nil, err
+	}
+	return direct.ConnConfig, nil
+}
+
+// The fixed local listener excludes a second judge before any Docker cleanup.
+// That ownership guarantee does not extend to engines shared by other hosts.
+func localDockerHost(value string) bool {
+	u, err := url.Parse(value)
+	if err != nil || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
+		return false
+	}
+	switch u.Scheme {
+	case "unix":
+		return u.Host == "" && strings.HasPrefix(u.Path, "/") && len(u.Path) > 1
+	case "npipe":
+		return u.Host == "" && strings.HasPrefix(u.Path, "//./pipe/") && len(u.Path) > len("//./pipe/")
+	case "tcp":
+		ip := net.ParseIP(u.Hostname())
+		return (u.Hostname() == "localhost" || ip != nil && ip.IsLoopback()) && u.Port() != "" && u.Path == ""
+	default:
+		return false
+	}
 }
 
 func configuredValue(name, fallback string) string {
