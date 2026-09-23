@@ -1,17 +1,15 @@
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { BarChart3, Check, ChevronLeft, ChevronRight, Flame, Heart, Trophy, X } from 'lucide-react';
-import { MAX_STREAK_HEARTS, practiceClock } from '../../shared/practice-activity.mjs';
-import type { Exercise } from '../lib/exercises';
-import type { ProgressData } from '../lib/progress';
 import {
-  loadActivity,
-  monthCells,
-  repairActivity,
-  shiftMonth,
+  MAX_STREAK_HEARTS,
+  practiceClock,
   type ActivitySnapshot,
-} from '../lib/practice-activity';
+} from '../shared/practice-activity.ts';
+import type { Exercise } from '../shared/exercises';
+import type { ProgressData } from '../lib/progress';
+import { loadActivity, monthCells, repairActivity, shiftMonth } from '../lib/practice-activity';
 import Modal from './Modal';
-import '../practice-tracker.css';
+import '../styles/practice-tracker.css';
 
 const difficulties = ['Easy', 'Medium', 'Hard'] as const;
 const colors = ['#00bd7e', '#e7a321', '#ee4959'];

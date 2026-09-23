@@ -1,5 +1,5 @@
 import { after } from 'next/server';
-import { createApiHandler } from '../../../../server/index.mjs';
+import { createApiHandler } from '../../../server/index.ts';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';

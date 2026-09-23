@@ -1,0 +1,676 @@
+/* IDE-specific layouts, previews, and motion. Shared element and component styles live in globals.css. */
+
+/* Global palette and native controls. */
+::selection {
+  background: #4a4a4a;
+  color: #fff;
+}
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+::-webkit-scrollbar-thumb {
+  background: #555;
+  border-radius: 0;
+}
+
+/* Application shell, top bar, and navigation. */
+.app.ide-view {
+  height: 100dvh;
+  overflow: hidden;
+}
+.app.library-view {
+  height: auto;
+  min-height: 100dvh;
+  overflow: visible;
+}
+.topbar .button {
+  min-height: 28px;
+  padding: 4px 9px;
+  font-size: 12px;
+}
+.button.primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+.button.primary:hover:not(:disabled) {
+  background: #12d393;
+  border-color: #12d393;
+}
+.button.secondary {
+  background: #3a3a3a;
+  border-color: #3a3a3a;
+}
+.button.secondary:hover:not(:disabled) {
+  background: #484848;
+  border-color: #484848;
+}
+.button.quiet {
+  color: var(--muted);
+}
+.button.quiet:hover:not(:disabled),
+.icon-button:hover:not(:disabled) {
+  color: var(--text);
+  background: #343434;
+}
+.button.stop {
+  background: #442929;
+  border-color: #8c4e4e;
+  color: #ffc0c0;
+}
+.ide-navigation {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+.ide-view .ide-navigation {
+  margin-right: auto;
+  border-left: 1px solid var(--border);
+  padding-left: 12px;
+}
+.ide-navigation > .button {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 400;
+}
+/* IDE split panels and question tabs. */
+.ide-view .app-body {
+  min-height: 0;
+  padding: 6px 10px 10px;
+  overflow: hidden;
+}
+.ide-view .main-workspace {
+  min-height: 0;
+  overflow: hidden;
+}
+.ide-view .workspace-grid {
+  position: relative;
+  grid-template-columns: minmax(0, 44fr) minmax(0, 56fr);
+  gap: 8px;
+  min-height: 0;
+}
+.ide-view .problem-panel,
+.ide-view .coding-panel {
+  background: var(--panel);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  min-height: 0;
+  overflow: hidden;
+}
+.question-tabs {
+  display: flex;
+  align-items: stretch;
+  flex-shrink: 0;
+  min-height: 40px;
+  padding: 0 12px;
+  gap: 15px;
+  border-bottom: 1px solid var(--border);
+  overflow-x: auto;
+}
+.question-tabs > button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  position: relative;
+  color: var(--muted);
+  font-size: 14px;
+  font-weight: 600;
+  min-height: 40px;
+  flex-shrink: 0;
+  padding: 0 3px;
+  border-radius: 0;
+  border-bottom: 1px solid transparent;
+  white-space: nowrap;
+}
+.question-tabs > button + button::before {
+  content: '';
+  position: absolute;
+  left: -9px;
+  height: 16px;
+  width: 1px;
+  background: var(--border);
+}
+.question-tabs > button.active,
+.question-tabs > button[aria-selected='true'] {
+  color: var(--text);
+  border-bottom-color: #b6b6b6;
+  font-weight: 600;
+}
+.question-tabs > button:hover {
+  color: var(--text);
+}
+.question-tabs small {
+  font-size: 11px;
+  color: var(--muted);
+}
+/* Problem statement, examples, and reference solutions. */
+.ide-view .problem-content {
+  min-height: 0;
+  flex: 1;
+  overflow: auto;
+  padding: 26px 24px 30px;
+}
+.problem-content h1 {
+  font-family: var(--body-font);
+  font-size: 23px;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: -0.35px;
+  margin-bottom: 14px;
+}
+.problem-title-row {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+}
+.problem-title-row .solved-label {
+  flex-shrink: 0;
+  margin-top: 4px;
+}
+.problem-meta > span:not(.difficulty):not(.solved-label) {
+  border: 1px solid #555;
+  border-radius: 16px;
+  padding: 4px 10px;
+  font-size: 11px;
+}
+.difficulty-easy {
+  background: #293d34;
+  color: #27ce97;
+}
+.difficulty-medium {
+  background: #403926;
+  color: #e0bf64;
+}
+.difficulty-hard {
+  background: #422e2e;
+  color: #f09090;
+}
+.problem-content h2 {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 650;
+  letter-spacing: 0;
+  margin-bottom: 18px;
+}
+.requirements {
+  margin-top: 26px;
+}
+.requirements li::marker {
+  color: #d1d1d1;
+}
+.example {
+  margin-top: 26px;
+}
+.example-code > div {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  min-width: 0;
+}
+.example-code > div > span {
+  color: #42d9c8;
+  font: 14px/1.7 var(--code-font);
+  margin: 0;
+  flex-shrink: 0;
+}
+.example-code pre {
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.7;
+}
+.example-scenario > div {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 6px;
+}
+.example-scenario > div > span {
+  font-family: var(--body-font);
+  font-weight: 600;
+}
+.example-scenario pre {
+  min-width: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.example[data-runtime='sql'] pre {
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre;
+}
+.frontend-preview {
+  margin-top: 26px;
+}
+.frontend-preview-toolbar,
+.frontend-preview-controls {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.frontend-preview-toolbar {
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+.frontend-preview-toolbar h2 {
+  margin: 0;
+}
+.frontend-preview-controls .button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 30px;
+  padding: 4px 8px;
+  font-size: 12px;
+  font-weight: 400;
+}
+.frontend-preview-controls select {
+  padding: 5px 8px;
+  border-radius: 4px;
+  font: 12px var(--body-font);
+}
+.frontend-preview-scale {
+  color: var(--muted);
+  font-size: 12px;
+}
+.frontend-preview-stage {
+  padding: 18px;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #fff;
+  color: #171717;
+}
+.frontend-preview-viewport {
+  position: relative;
+  max-width: 100%;
+  margin-inline: auto;
+}
+.frontend-preview-viewport iframe {
+  position: absolute;
+  inset: 0 auto auto 0;
+  display: block;
+  border: 0;
+  transform-origin: top left;
+  color-scheme: light;
+}
+.frontend-preview-status {
+  padding: 20px 0;
+  font-size: 14px;
+  line-height: 1.6;
+}
+.frontend-preview-status .button {
+  margin-top: 12px;
+}
+.frontend-preview-caption {
+  margin-top: 10px;
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.7;
+}
+.reference-code {
+  margin-top: 16px;
+}
+.reference-code .solution-alternative h2 {
+  font-size: 20px;
+}
+.reference-code .solution-alternative p {
+  font-size: 15px;
+  line-height: 1.8;
+}
+/* Editor header and run/submit controls. */
+.editor-header strong {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+.reset-button {
+  min-height: 26px;
+  padding: 3px 7px;
+  font-size: 13px;
+}
+.ide-view .editor-area {
+  position: relative;
+  flex: 1 1 0;
+  min-height: 80px;
+  overflow: hidden;
+}
+.editor-area .cm-editor:focus-within {
+  box-shadow: none;
+}
+/* A one-shot accepted-submit celebration; never changes layout or captures input. */
+.submission-celebration,
+.submission-confetti-bursts {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  overflow: hidden;
+  pointer-events: none;
+}
+.submission-celebration-check {
+  position: absolute;
+  bottom: 16px;
+  left: 28px;
+  display: grid;
+  place-items: center;
+  width: 108px;
+  height: 108px;
+  border-radius: 50%;
+  color: #22c55e;
+  background: #153c2a;
+  box-shadow: 0 0 36px 12px #22c55e40;
+  animation: submission-check 2100ms ease-out both;
+}
+.submission-confetti {
+  position: absolute;
+  top: 20%;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--confetti-color);
+  box-shadow: 0 0 7px var(--confetti-color);
+  animation: submission-confetti 1800ms ease-out var(--confetti-delay) both;
+}
+.submission-celebration-check svg {
+  stroke-width: 3.5;
+}
+@keyframes submission-check {
+  0% {
+    opacity: 0;
+    transform: scale(0.65);
+  }
+  16% {
+    opacity: 1;
+    transform: scale(1.06);
+  }
+  25%,
+  72% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+}
+@keyframes submission-confetti {
+  0% {
+    opacity: 0;
+    transform: translate(0, 0) scale(0.5);
+  }
+  15% {
+    opacity: 0.8;
+  }
+  40% {
+    opacity: 0.7;
+    transform: translate(var(--confetti-x), var(--confetti-rise)) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translate(var(--confetti-x), var(--confetti-fall)) scale(0.65);
+  }
+}
+@media (max-width: 700px), (max-height: 600px) {
+  .submission-celebration-check {
+    bottom: 12px;
+    left: 18px;
+    width: 64px;
+    height: 64px;
+  }
+  .submission-celebration-check svg {
+    width: 36px;
+    height: 36px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .submission-celebration-check {
+    animation: none;
+  }
+  .submission-confetti {
+    display: none;
+  }
+}
+.ide-view .action-bar {
+  flex-shrink: 0;
+  margin-top: auto;
+  min-height: 50px;
+  padding: 7px 16px 8px 22px;
+  border-top: 1px solid var(--border);
+  gap: 10px;
+}
+.action-bar .button {
+  min-height: 33px;
+  padding: 6px 17px;
+  font-size: 14px;
+}
+.console-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 6px 9px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  white-space: nowrap;
+}
+.console-toggle:hover {
+  color: #fff;
+  background: #303030;
+  border-radius: 4px;
+}
+/* Results and saved submissions. */
+.ide-view .result-panel {
+  flex: 0 1 42%;
+  min-height: 205px;
+  max-height: 48%;
+  background: #252525;
+  border-color: var(--border);
+  overflow: hidden;
+}
+.result-content {
+  padding: 18px 22px 22px;
+}
+.result-heading > strong {
+  font-size: 18px;
+  font-weight: 500;
+}
+.result-heading > span {
+  color: #ddd;
+  font-size: 14px;
+  margin-left: auto;
+  padding-left: 0;
+}
+.case-tabs > button.active {
+  border-color: transparent;
+  background: #383838;
+}
+.case-tabs > button:hover {
+  background: #333;
+}
+.case-tabs > button.pass > svg {
+  color: #54c986;
+}
+.case-tabs > button.fail > svg {
+  color: #f16c78;
+}
+.correct-output pre,
+.expected-output pre {
+  border-left-color: #4aad68;
+}
+.wrong-output pre {
+  border-left-color: #e16470;
+}
+.submission-list {
+  padding: 0;
+}
+.submission-row:hover {
+  background: #303030;
+}
+.submission-row > span:nth-child(2),
+.submission-row time {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+/* Existing library, backup and saved-submission dialogs share the gray palette. */
+.modal-description,
+.modal-description strong {
+  color: #c4c4c4;
+}
+.progress-totals dt,
+.progress-totals dd small {
+  color: #aaa;
+}
+
+/* Compact and mobile IDE layouts. */
+@media (max-width: 980px) {
+  .question-tabs {
+    gap: 13px;
+    padding: 0 10px;
+  }
+  .question-tabs > button {
+    gap: 5px;
+  }
+  .ide-view .problem-content {
+    padding: 24px 20px;
+  }
+}
+@media (max-width: 700px) {
+  .topbar {
+    padding: 0 9px;
+    gap: 7px;
+  }
+  .topbar .brand {
+    font-size: 13px;
+  }
+  .ide-view .brand > span {
+    display: none;
+  }
+  .topbar .button {
+    padding: 4px 6px;
+  }
+  .ide-navigation {
+    gap: 4px;
+  }
+  .ide-view .ide-navigation {
+    padding-left: 7px;
+  }
+  .ide-navigation > .button {
+    font-size: 12px;
+  }
+  .exercise-navigation {
+    gap: 0;
+  }
+  .ide-view .app-body {
+    padding: 4px 6px 6px;
+  }
+  .ide-view .mobile-pane-tabs {
+    border-bottom: 1px solid #3c4d65;
+    display: flex;
+    flex-shrink: 0;
+    background: var(--base);
+    border-color: var(--border);
+    padding: 0 10px;
+    gap: 25px;
+    margin-bottom: 6px;
+  }
+  .mobile-pane-tabs > button {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    border-bottom: 2px solid transparent;
+    padding: 9px 0;
+    color: var(--muted);
+    font-size: 12px;
+  }
+  .mobile-pane-tabs > button.active {
+    color: var(--text);
+    border-bottom-color: var(--accent);
+  }
+  .ide-view .workspace-grid {
+    display: flex;
+    flex-direction: column;
+    flex: 1;
+  }
+  .ide-view .problem-panel,
+  .ide-view .coding-panel {
+    flex: 1;
+    height: 100%;
+    border-radius: 9px;
+  }
+  .ide-view .mobile-problem .coding-panel,
+  .ide-view .mobile-code .problem-panel {
+    display: none;
+  }
+  .question-tabs {
+    gap: 8px;
+    padding: 0 8px;
+  }
+  .question-tabs > button {
+    gap: 4px;
+    padding: 0 2px;
+  }
+  .question-tabs > button + button::before {
+    left: -5px;
+  }
+  .ide-view .problem-content {
+    padding: 23px 18px;
+  }
+  .requirements ul {
+    font-size: 13px;
+  }
+  .example-code {
+    padding: 14px 12px;
+    gap: 18px;
+  }
+  .example-code > div {
+    gap: 7px;
+  }
+  .example-code > div > span,
+  .example-code pre {
+    font-size: 13px;
+  }
+  .editor-header {
+    padding: 0 10px 0 15px;
+  }
+  .ide-view .action-bar {
+    min-height: 49px;
+    padding: 7px 10px;
+    gap: 4px;
+  }
+  .action-bar > div {
+    gap: 7px;
+  }
+  .action-bar .button {
+    min-height: 32px;
+    font-size: 12px;
+    padding: 6px 12px;
+    gap: 5px;
+  }
+  .console-toggle {
+    font-size: 12px;
+    padding: 6px 4px;
+  }
+  .ide-view .result-panel {
+    min-height: 185px;
+  }
+  .result-header {
+    min-height: 36px;
+    padding: 0 16px;
+  }
+  .result-content {
+    padding: 16px;
+  }
+  .submission-row {
+    gap: 7px;
+  }
+  .submission-row > span:first-child {
+    font-size: 12px;
+  }
+  .submission-row time {
+    font-size: 10px;
+  }
+}

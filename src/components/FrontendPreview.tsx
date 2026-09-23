@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { RotateCcw } from 'lucide-react';
-import type { Exercise } from '../lib/exercises';
+import type { Exercise } from '../shared/exercises';
 
 /** Displays the authored target, never the learner's editor contents. */
 export default function FrontendPreview({ exercise }: { exercise: Exercise }) {
@@ -28,7 +28,7 @@ export default function FrontendPreview({ exercise }: { exercise: Exercise }) {
     setReady(false);
     const query = new URLSearchParams({
       problemId: exercise.id,
-      problemVersion: exercise.version ?? '',
+      problemVersion: exercise.version,
     });
     fetch('/api/preview?' + query, { signal: controller.signal, credentials: 'same-origin' })
       .then(async (response) => {

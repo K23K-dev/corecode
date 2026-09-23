@@ -1,11 +1,4 @@
-import type { Exercise } from './exercises';
-
-export type TestCase = {
-  name: string;
-  args: string;
-  expected: string;
-  check?: 'unchanged' | 'independent_rows';
-};
+import type { Exercise } from '../shared/exercises';
 
 export type CaseResult = {
   name: string;
@@ -75,21 +68,25 @@ function pendingSubmissions(storage: RecoveryStorage | null): PendingSubmission[
     for (let i = 0; storage && i < storage.length; i++) {
       const key = storage.key(i);
       if (!key?.startsWith(pendingPrefix)) continue;
-      const item = JSON.parse(storage.getItem(key) ?? 'null') as PendingSubmission | null;
-      if (
-        item &&
-        key === pendingPrefix + item.submissionId &&
-        typeof item.problemId === 'string' &&
-        typeof item.problemVersion === 'string' &&
-        typeof item.code === 'string' &&
-        Array.isArray(item.completionIntentIds) &&
-        item.completionIntentIds.every((id) => typeof id === 'string')
-      )
-        entries.set(item.submissionId, {
-          ...item,
-          cancelRequested:
-            item.cancelRequested || entries.get(item.submissionId)?.cancelRequested || false,
-        });
+      try {
+        const item = JSON.parse(storage.getItem(key) ?? 'null') as PendingSubmission | null;
+        if (
+          item &&
+          key === pendingPrefix + item.submissionId &&
+          typeof item.problemId === 'string' &&
+          typeof item.problemVersion === 'string' &&
+          typeof item.code === 'string' &&
+          Array.isArray(item.completionIntentIds) &&
+          item.completionIntentIds.every((id) => typeof id === 'string')
+        )
+          entries.set(item.submissionId, {
+            ...item,
+            cancelRequested:
+              item.cancelRequested || entries.get(item.submissionId)?.cancelRequested || false,
+          });
+      } catch {
+        // Leave unreadable records untouched and recover the remaining submissions.
+      }
     }
   } catch {
     // Existing in-memory records remain recoverable if browser storage disappears.
@@ -229,7 +226,6 @@ export class PracticeRunner {
       await this.checkCompatibility(controller.signal);
       controller.signal.throwIfAborted();
       if (mode === 'submit') {
-        if (!exercise.version) throw new Error('Refresh this problem before submitting.');
         const existing = pendingSubmissions(this.storage).find(
           (item) => item.problemId === exercise.id && !item.cancelRequested,
         );

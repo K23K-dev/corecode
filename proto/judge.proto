@@ -1,0 +1,99 @@
+syntax = "proto3";
+
+package corecode.judge.v1;
+
+option go_package = "github.com/K23K-dev/corecode/judge/gen;judgev1";
+
+// Internal server-to-server API. The judge loads the exact private grading spec
+// from the database; callers cannot select a runtime or supply grading cases.
+service JudgeService {
+  // Ephemeral example execution. Disconnecting or canceling the RPC stops it.
+  rpc Run(RunRequest) returns (RunResult);
+  // Acknowledges a durable submission. Disconnecting does not cancel the job.
+  rpc Submit(SubmitRequest) returns (JobSnapshot);
+  rpc GetJob(JobRequest) returns (JobSnapshot);
+  // Returns status metadata without grading results; use GetJob for the result.
+  rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
+  // Sends the current snapshot, then changes. Disconnecting only stops watching.
+  rpc WatchJob(JobRequest) returns (stream JobSnapshot);
+  // Queued work can cancel immediately; running work remains CANCELING until
+  // cleanup is confirmed. Already terminal jobs return their existing outcome.
+  rpc CancelJob(JobRequest) returns (JobSnapshot);
+}
+
+message RunRequest {
+  string problem_id = 1;
+  string problem_version = 2;
+  string code = 3;
+}
+
+message SubmitRequest {
+  // UUID supplied once by the caller and reused for retries of the same payload.
+  // Reusing it with different immutable input returns ALREADY_EXISTS.
+  string submission_id = 1;
+  string problem_id = 2;
+  string problem_version = 3;
+  string code = 4;
+  // Pending solved-state intent and superseded IDs captured when submitting.
+  // Only an accepted result retires these IDs; later user intentions survive.
+  repeated string completion_intent_ids = 5;
+}
+
+message JobRequest {
+  string job_id = 1;
+}
+
+message ListJobsRequest {
+  string problem_id = 1;
+  uint32 page_size = 2;
+  string page_token = 3;
+}
+
+message ListJobsResponse {
+  repeated JobSnapshot jobs = 1;
+  string next_page_token = 2;
+}
+
+enum JobState {
+  JOB_STATE_UNSPECIFIED = 0;
+  JOB_STATE_QUEUED = 1;
+  JOB_STATE_RUNNING = 2;
+  JOB_STATE_CANCELING = 3;
+  // Grading finished, including learner failures represented in RunResult.
+  JOB_STATE_COMPLETED = 4;
+  // Infrastructure or grading-spec failure, not a learner's failed case.
+  JOB_STATE_FAILED = 5;
+  JOB_STATE_CANCELED = 6;
+}
+
+message JobSnapshot {
+  string job_id = 1;
+  string problem_id = 2;
+  string problem_version = 3;
+  JobState state = 4;
+  // Server timestamps in UTC RFC 3339 format; absent before the transition.
+  string created_at = 5;
+  optional string started_at = 6;
+  optional string finished_at = 7;
+  RunResult result = 8;
+  optional string error = 9;
+  // Monotonically increases with each transition so watchers can ignore old snapshots.
+  uint64 revision = 10;
+}
+
+// Mirrors the existing UI result, independently of durable job metadata.
+message RunResult {
+  repeated CaseResult cases = 1;
+  string stdout = 2;
+  double duration_ms = 3;
+  optional string error = 4;
+}
+
+message CaseResult {
+  string name = 1;
+  string input = 2;
+  optional string expected = 3;
+  optional string actual = 4;
+  optional bool passed = 5;
+  optional string error = 6;
+}

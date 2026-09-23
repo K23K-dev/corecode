@@ -1,33 +1,25 @@
 import {
   isDateKey,
   MAX_STREAK_HEARTS,
-  practiceClock,
-  summarizeActivity,
-} from '../../shared/practice-activity.mjs';
+  requireDateOrdinal,
+  type ActivityDay,
+  type ActivitySnapshot,
+} from '../shared/practice-activity.ts';
 
-export type ActivityDay = { date: string; count: number };
-
-export type ActivitySnapshot = {
-  timeZone: 'America/New_York';
-  resetHour: 20;
-  today: string;
-  resetAt: string;
-  serverNow: string;
-  days: ActivityDay[];
-  repairs: string[];
-  streak: ReturnType<typeof summarizeActivity>;
-};
-
-/** Keep unavailable or malformed history out of the calendar and repair controls. */
-export function parseActivity(value: unknown): ActivitySnapshot {
+/** Validate the response shape; the server owns streak and heart calculations. */
+function parseActivity(value: unknown): ActivitySnapshot {
   const invalid = () => new Error('Activity could not be loaded.');
   if (!value || typeof value !== 'object') throw invalid();
   const activity = value as ActivitySnapshot;
+  const { streak } = activity;
   if (
     activity.timeZone !== 'America/New_York' ||
     activity.resetHour !== 20 ||
     typeof activity.serverNow !== 'string' ||
     !Number.isFinite(Date.parse(activity.serverNow)) ||
+    !isDateKey(activity.today) ||
+    typeof activity.resetAt !== 'string' ||
+    !Number.isFinite(Date.parse(activity.resetAt)) ||
     !Array.isArray(activity.days) ||
     activity.days.length > 100_000 ||
     activity.days.some(
@@ -36,28 +28,14 @@ export function parseActivity(value: unknown): ActivitySnapshot {
     !Array.isArray(activity.repairs) ||
     activity.repairs.length > 100_000 ||
     activity.repairs.some((day) => !isDateKey(day)) ||
-    !activity.streak
+    !streak ||
+    (streak.startedOn !== null && !isDateKey(streak.startedOn)) ||
+    [streak.current, streak.best, streak.hearts, streak.earnedHearts, streak.heartProgress].some(
+      (count) => !Number.isSafeInteger(count) || count < 0,
+    ) ||
+    streak.hearts > MAX_STREAK_HEARTS ||
+    streak.heartProgress >= 5
   )
-    throw invalid();
-  const clock = practiceClock(new Date(activity.serverNow));
-  if (clock.today !== activity.today || clock.resetAt !== activity.resetAt) throw invalid();
-  if (
-    (activity.streak.startedOn !== null &&
-      (!isDateKey(activity.streak.startedOn) || activity.streak.startedOn > activity.today)) ||
-    !Number.isSafeInteger(activity.streak.hearts) ||
-    activity.streak.hearts < 0 ||
-    activity.streak.hearts > MAX_STREAK_HEARTS
-  )
-    throw invalid();
-  const expected = summarizeActivity(activity.days, activity.repairs, activity.today, {
-    joinedOn: activity.streak.startedOn,
-  });
-  for (const key of Object.keys(expected) as (keyof typeof expected)[]) {
-    // Receipt ordering and discarded credits at capacity stay server-side.
-    if (key === 'hearts') continue;
-    if (activity.streak[key] !== expected[key]) throw invalid();
-  }
-  if (activity.streak.hearts > Math.max(0, expected.earnedHearts - new Set(activity.repairs).size))
     throw invalid();
   return activity;
 }
@@ -88,7 +66,7 @@ export async function repairActivity(date: string, signal: AbortSignal): Promise
   return parseActivity(await response.json());
 }
 
-export type ActivityCalendarCell = {
+type ActivityCalendarCell = {
   date: string | null;
   day: number | null;
   count: number;
@@ -98,53 +76,13 @@ export type ActivityCalendarCell = {
 
 const DAY_MS = 86_400_000;
 
-// Treat date keys as calendar days, not instants in a daylight-saving time zone.
-function dateOrdinal(value: string): number | null {
-  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
-  const [year, month, day] = value.split('-').map(Number);
-  if (year < 1 || month < 1 || month > 12 || day < 1 || day > 31) return null;
-  const date = new Date(0);
-  date.setUTCFullYear(year, month - 1, day);
-  if (
-    date.getUTCFullYear() !== year ||
-    date.getUTCMonth() !== month - 1 ||
-    date.getUTCDate() !== day
-  )
-    return null;
-  return date.getTime() / DAY_MS;
-}
-
-function requireDateOrdinal(value: string): number {
-  const ordinal = dateOrdinal(value);
-  if (ordinal === null)
-    throw new RangeError('Expected a valid calendar date in YYYY-MM-DD format.');
-  return ordinal;
-}
-
-function activityCounts(days: ActivityDay[]): Map<number, number> {
-  const counts = new Map<number, number>();
-  for (const day of days) {
-    if (!day || !Number.isSafeInteger(day.count) || day.count <= 0) continue;
-    const ordinal = dateOrdinal(day.date);
-    if (ordinal === null) continue;
-    counts.set(ordinal, Math.min(Number.MAX_SAFE_INTEGER, (counts.get(ordinal) ?? 0) + day.count));
-  }
-  return counts;
-}
-
-function monthStart(month: string): number {
-  if (typeof month !== 'string' || !/^\d{4}-\d{2}$/.test(month))
-    throw new RangeError('Expected a month in YYYY-MM format.');
-  return requireDateOrdinal(`${month}-01`);
-}
-
 /** A Sunday-first month padded to full weeks with empty cells. */
 export function monthCells(
   month: string,
   days: ActivityDay[],
   today: string,
 ): ActivityCalendarCell[] {
-  const firstOrdinal = monthStart(month);
+  const firstOrdinal = requireDateOrdinal(`${month}-01`);
   const todayOrdinal = requireDateOrdinal(today);
   const firstDate = new Date(firstOrdinal * DAY_MS);
   const lastDate = new Date(firstDate);
@@ -152,16 +90,19 @@ export function monthCells(
   const daysInMonth = lastDate.getUTCDate();
   const leading = firstDate.getUTCDay();
   const length = Math.ceil((leading + daysInMonth) / 7) * 7;
-  const counts = activityCounts(days);
+  const counts = new Map<string, number>();
+  for (const { date, count } of days)
+    counts.set(date, Math.min(Number.MAX_SAFE_INTEGER, (counts.get(date) ?? 0) + count));
   return Array.from({ length }, (_, index) => {
     const day = index - leading + 1;
     if (day < 1 || day > daysInMonth)
       return { date: null, day: null, count: 0, isToday: false, isFuture: false };
     const ordinal = firstOrdinal + day - 1;
+    const date = `${month}-${String(day).padStart(2, '0')}`;
     return {
-      date: `${month}-${String(day).padStart(2, '0')}`,
+      date,
       day,
-      count: counts.get(ordinal) ?? 0,
+      count: counts.get(date) ?? 0,
       isToday: ordinal === todayOrdinal,
       isFuture: ordinal > todayOrdinal,
     };
@@ -169,7 +110,7 @@ export function monthCells(
 }
 
 export function shiftMonth(month: string, delta: number): string {
-  monthStart(month);
+  requireDateOrdinal(`${month}-01`);
   if (!Number.isSafeInteger(delta)) throw new RangeError('Expected an integer month offset.');
   const [year, number] = month.split('-').map(Number);
   const shifted = year * 12 + number - 1 + delta;

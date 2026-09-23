@@ -1,4 +1,4 @@
-import type { Exercise } from './exercises';
+import type { Exercise } from '../shared/exercises';
 import {
   MAX_ATTEMPTS_PER_EXERCISE,
   MAX_BACKUP_BYTES,
@@ -426,8 +426,30 @@ export class ProgressClient {
         try {
           const raw = this.storage.getItem(key);
           if (!raw) continue;
-          const value = JSON.parse(raw) as Outbox & { acknowledged?: boolean };
-          if (value.acknowledged) continue;
+          const value = JSON.parse(raw) as Outbox & {
+            acknowledged?: boolean;
+            acknowledgedRevision?: number;
+          };
+          if (value.acknowledged) {
+            if (
+              value.progress &&
+              safeId(value.generation) &&
+              Number.isSafeInteger(value.acknowledgedRevision) &&
+              Object.entries(value.progress.exercises).every(
+                ([id, record]) => this.base.progress.exercises[id]?.draft === record.draft,
+              ) &&
+              this.storage.getItem(key) === raw
+            )
+              this.storage.setItem(
+                key,
+                JSON.stringify({
+                  generation: value.generation,
+                  acknowledged: true,
+                  acknowledgedRevision: value.acknowledgedRevision,
+                }),
+              );
+            continue;
+          }
           if (
             value.version !== 1 ||
             !safeId(value.generation) ||
@@ -742,15 +764,22 @@ export class ProgressClient {
             if (this.pending[kind][id]?.id === value.id) delete this.pending[kind][id];
         for (const [key, raw] of captures) {
           try {
-            if (this.storage?.getItem(key) === raw)
+            if (this.storage?.getItem(key) === raw) {
+              const value = JSON.parse(raw) as Outbox;
+              // Keep conflict drafts when the receipt may be their only recovery copy.
+              const saved = Object.entries(value.progress.exercises).every(
+                ([id, record]) => this.base.progress.exercises[id]?.draft === record.draft,
+              );
               this.storage.setItem(
                 key,
                 JSON.stringify({
-                  ...JSON.parse(raw),
+                  ...(saved ? {} : value),
+                  generation: value.generation,
                   acknowledged: true,
                   acknowledgedRevision: this.base.revision,
                 }),
               );
+            }
           } catch {
             this.recoveryWarning =
               'Changes are saved, but the browser recovery receipt could not be updated.';

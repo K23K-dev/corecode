@@ -1,24 +1,24 @@
 import { useRef, useState } from 'react';
 import { Database, Download, Upload } from 'lucide-react';
 import { exportProgress, parseProgressBackup, type ProgressData } from '../lib/progress';
-import type { Exercise } from '../lib/exercises';
+import type { Exercise } from '../shared/exercises';
 import Modal from './Modal';
 
 export default function ProgressModal({
   data,
   onRestore,
   onClose,
-  readyExercises,
+  exercises,
 }: {
   data: ProgressData;
   onRestore: (data: ProgressData) => void;
   onClose: () => void;
-  readyExercises: Exercise[];
+  exercises: Exercise[];
 }) {
   const input = useRef<HTMLInputElement>(null);
   const [pending, setPending] = useState<ProgressData | null>(null);
   const [error, setError] = useState('');
-  const completed = readyExercises.filter((item) => data.exercises[item.id]?.solved).length;
+  const completed = exercises.filter((item) => data.exercises[item.id]?.solved).length;
   const drafts = Object.keys(data.exercises).length;
   const submissions = Object.values(data.exercises).reduce(
     (total, value) => total + value.attempts.length,
@@ -53,7 +53,7 @@ export default function ProgressModal({
           <dt>Solved</dt>
           <dd>
             {completed}
-            <small> / {readyExercises.length}</small>
+            <small> / {exercises.length}</small>
           </dd>
         </div>
         <div>

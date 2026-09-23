@@ -1,6 +1,7 @@
 # Code Practice
 
-A Next.js coding-practice website. Problems, grading cases, and progress live in Neon.
+A Next.js coding-practice website with a TypeScript frontend and API, plus a Go judge.
+Problems, grading cases, and progress live in Neon.
 
 ## Run locally
 
@@ -16,10 +17,11 @@ Open [localhost:5173](http://127.0.0.1:5173). For a built version, run
 `npm run build` followed by `npm start`.
 
 Both websites use one Go judge in Vercel Sandbox, waking it when needed. Submissions
-live in Neon and save history and progress together. Link the existing Vercel project,
-pull `.env.local` for local Sandbox authentication, then prepare the judge once with
-Go 1.27+ and `npm run judge:setup`. Setup creates the runtime without connecting to Neon.
-Run `npm run check` and `npm run judge:check` to verify changes.
+live in Neon and save history and progress together. Local Sandbox authentication
+comes from the existing Vercel project's `.env.local`.
+
+Run `npm run check` and `npm run judge:check` to verify changes. Go 1.27+ is needed
+for judge builds; `npm run judge:images` rebuilds the local Docker grading images.
 
 ## Vercel
 
@@ -39,6 +41,6 @@ after 30 idle seconds; sessions have a four-minute fallback timeout. Interrupted
 recover on the next execution request. Free-tier quotas apply. Preview deployments
 cannot use the personal data API. Never delete/recreate the sandbox while jobs remain.
 
-Apply approved Neon schema updates with `initializeDatabase` in
-`server/repository.mjs` before deploying code that needs them. Vercel deployment
-does not run migrations or seed content. Never commit credentials.
+The app uses the existing Neon schema and hosted judge. Database changes are applied
+manually when needed; starting or deploying the website does not provision either.
+Never commit credentials.

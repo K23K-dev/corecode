@@ -1,4 +1,4 @@
-import App from '../../../App';
+import PracticeWorkspace from '../../../components/PracticeWorkspace';
 
 export default async function ProblemPage({
   params,
@@ -9,5 +9,7 @@ export default async function ProblemPage({
 }) {
   const { id } = await params;
   const { tab } = await searchParams;
-  return <App problemId={id} initialTab={tab === 'solution' ? 'solution' : 'question'} />;
+  return (
+    <PracticeWorkspace problemId={id} initialTab={tab === 'solution' ? 'solution' : 'question'} />
+  );
 }

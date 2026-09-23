@@ -1,10 +1,10 @@
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
-import DatabaseApp from '../DatabaseApp';
-import '../styles.css';
+import PracticeProvider from '../components/PracticeProvider';
+import '../styles/globals.css';
 import '@fontsource/geist/latin-700.css';
-import '../library-page.css';
-import '../neetcode-theme.css';
+import '../styles/library.css';
+import '../styles/workspace.css';
 
 export const metadata: Metadata = {
   title: 'Code Practice',
@@ -18,7 +18,7 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <body>
-        <DatabaseApp>{children}</DatabaseApp>
+        <PracticeProvider>{children}</PracticeProvider>
       </body>
     </html>
   );

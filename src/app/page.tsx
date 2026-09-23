@@ -1,5 +1,5 @@
-import App from '../App';
+import PracticeWorkspace from '../components/PracticeWorkspace';
 
 export default function HomePage() {
-  return <App />;
+  return <PracticeWorkspace />;
 }

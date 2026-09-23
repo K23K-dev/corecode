@@ -7,15 +7,14 @@
     "dev": "next dev --hostname 127.0.0.1 --port 5173",
     "start": "next start --hostname 127.0.0.1 --port 5173",
     "build": "next build",
-    "runner:setup": "node runner/setup.mjs",
-    "judge:dev": "node runner/judge/tool.mjs dev",
-    "judge:build": "node runner/judge/tool.mjs build",
-    "judge:check": "node runner/judge/tool.mjs check",
-    "judge:generate": "node runner/judge/tool.mjs generate",
-    "format": "prettier --write \"{src,server,shared,runner}/**/*.{ts,mts,tsx,js,mjs,css}\" next.config.ts package.json tsconfig.json vercel.json",
-    "format:check": "prettier --check \"{src,server,shared,runner}/**/*.{ts,mts,tsx,js,mjs,css}\" next.config.ts package.json tsconfig.json vercel.json",
-    "check": "npm run format:check && npm run build",
-    "judge:setup": "node runner/sandbox/setup.mjs"
+    "judge:images": "node judge/build-images.mjs",
+    "judge:dev": "node judge/tool.mjs dev",
+    "judge:build": "node judge/tool.mjs build",
+    "judge:check": "node judge/tool.mjs check",
+    "judge:generate": "node judge/tool.mjs generate",
+    "format": "prettier --write \"{src,judge}/**/*.{ts,mts,tsx,js,mjs,css}\" next.config.ts package.json tsconfig.json vercel.json",
+    "format:check": "prettier --check \"{src,judge}/**/*.{ts,mts,tsx,js,mjs,css}\" next.config.ts package.json tsconfig.json vercel.json",
+    "check": "npm run format:check && npm run build"
   },
   "dependencies": {
     "@bufbuild/protobuf": "2.15.0",

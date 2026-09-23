@@ -25,11 +25,10 @@ import {
   Star,
   X,
 } from 'lucide-react';
-import type { Exercise } from '../lib/exercises';
+import type { Exercise } from '../shared/exercises';
 import type { Catalog } from '../lib/database-client';
 import type { ProgressData } from '../lib/progress';
 import PracticeTracker, { useCalendarView } from './PracticeTracker';
-import '../library-page.css';
 
 const difficultyOrder = ['Easy', 'Medium', 'Hard'];
 type ProblemSort = { key: 'title' | 'difficulty'; direction: 'ascending' | 'descending' } | null;

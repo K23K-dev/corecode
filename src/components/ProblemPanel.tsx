@@ -2,7 +2,7 @@ import type { KeyboardEvent } from 'react';
 import { Check, ChevronRight, Code2, FileCode2, History, X } from 'lucide-react';
 import CodeEditor from './CodeEditor';
 import FrontendPreview from './FrontendPreview';
-import type { Exercise } from '../lib/exercises';
+import type { Exercise } from '../shared/exercises';
 import type { Attempt } from '../lib/progress';
 
 const PROBLEM_TABS = [

@@ -1,6 +1,7 @@
 **
-!runner/
-!runner/javascript/
-!runner/javascript/**
-!runner/python/
-!runner/python/**
+!judge/
+!judge/graders/
+!judge/graders/javascript/
+!judge/graders/javascript/**
+!judge/graders/python/
+!judge/graders/python/**
