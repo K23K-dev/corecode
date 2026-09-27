@@ -2,13 +2,12 @@ package main
 
 import (
 	"context"
+	"net/http"
 	"sync"
 	"time"
 
-	judgev1 "github.com/K23K-dev/corecode/judge/gen"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
+	"connectrpc.com/connect"
+	"github.com/K23K-dev/corecode/judge/gen/judgev1connect"
 )
 
 // Sandbox sessions stop after a quiet period, with a hard deadline that leaves
@@ -31,24 +30,18 @@ func newJudgeLifecycle(queue *jobQueue, idleTimeout, maxLifetime time.Duration) 
 	}
 }
 
-func (l *judgeLifecycle) interceptors() []grpc.ServerOption {
-	return []grpc.ServerOption{
-		grpc.ChainUnaryInterceptor(func(ctx context.Context, request any, info *grpc.UnaryServerInfo, next grpc.UnaryHandler) (any, error) {
-			work := info.FullMethod == judgev1.JudgeService_Run_FullMethodName || info.FullMethod == judgev1.JudgeService_Submit_FullMethodName
-			if !l.enter(work) {
-				return nil, status.Error(codes.Unavailable, "The judge session is stopping. Try again shortly.")
-			}
-			defer l.leave(work)
-			return next(ctx, request)
-		}),
-		grpc.ChainStreamInterceptor(func(service any, stream grpc.ServerStream, _ *grpc.StreamServerInfo, next grpc.StreamHandler) error {
-			if !l.enter(false) {
-				return status.Error(codes.Unavailable, "The judge session is stopping. Try again shortly.")
-			}
-			defer l.leave(false)
-			return next(service, stream)
-		}),
-	}
+// track refuses calls once draining starts and records Run and Submit as work.
+func (l *judgeLifecycle) track(next http.Handler) http.Handler {
+	errorWriter := connect.NewErrorWriter()
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		work := r.URL.Path == judgev1connect.JudgeServiceRunProcedure || r.URL.Path == judgev1connect.JudgeServiceSubmitProcedure
+		if !l.enter(work) {
+			_ = errorWriter.Write(w, r, rpcError(connect.CodeUnavailable, "The judge session is stopping. Try again shortly."))
+			return
+		}
+		defer l.leave(work)
+		next.ServeHTTP(w, r)
+	})
 }
 
 func (l *judgeLifecycle) enter(work bool) bool {
@@ -105,11 +98,12 @@ func (l *judgeLifecycle) stopIfIdle(ctx context.Context) bool {
 	q := l.queue
 	q.admission.Lock()
 	defer q.admission.Unlock()
+	ready := q.executor.available()
 	q.executor.mu.Lock()
-	ready, active := q.executor.runnable() && !q.executor.draining, q.executor.active
+	active := q.executor.active
 	q.executor.mu.Unlock()
-	// Do not mistake startup, an unavailable dependency, or held cleanup capacity
-	// for an idle judge. The absolute deadline still bounds an unhealthy session.
+	// Do not mistake startup or running work for an idle judge. The absolute
+	// deadline still bounds a session that never becomes ready.
 	if !ready || active != 0 {
 		l.touch()
 		return false

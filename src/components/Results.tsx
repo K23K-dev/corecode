@@ -1,6 +1,7 @@
-import { useEffect, useState, type CSSProperties } from 'react';
-import { Check, CircleAlert, CircleCheck, LoaderCircle, Terminal, X } from 'lucide-react';
-import type { JobSnapshot, RunResult } from '../lib/practice-runner';
+import { useEffect, useState } from 'react';
+import { Alert, Button, Code, EmptyState, Group, Loader, Stack, Text } from '@mantine/core';
+import { Check, CircleAlert, CircleCheck, Terminal, X } from 'lucide-react';
+import type { JobSnapshot, RunResult } from '../lib/runner';
 
 export interface Execution {
   mode: 'example' | 'submit';
@@ -10,37 +11,26 @@ export interface Execution {
   jobState?: JobSnapshot['state'];
 }
 
-const confettiColors = ['#22c55e', '#559bf8', '#d65fa6', '#f2b84b', '#a482ed'];
-const confetti = Array.from({ length: 28 }, (_, index) => {
-  const angle = ((index % 14) / 13) * Math.PI;
-  return {
-    left: index < 14 ? '10%' : '90%',
-    '--confetti-x': `${Math.round(Math.cos(angle) * 95)}px`,
-    '--confetti-rise': `${Math.round(-30 - Math.sin(angle) * 65)}px`,
-    '--confetti-fall': `${100 + (index % 5) * 18}px`,
-    '--confetti-delay': `${(index % 4) * 45}ms`,
-    '--confetti-color': confettiColors[index % confettiColors.length],
-  } as CSSProperties;
-});
-
-/** Decorative only; the results heading already announces an accepted submission. */
-export function SubmissionConfetti() {
+/** One labeled output box; a colored edge marks a passing or failing value. */
+function Value({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
-    <div className="submission-confetti-bursts" aria-hidden="true">
-      {confetti.map((style, index) => (
-        <span className="submission-confetti" key={index} style={style} />
-      ))}
-    </div>
-  );
-}
-
-export function SubmissionCelebration() {
-  return (
-    <div className="submission-celebration" aria-hidden="true">
-      <span className="submission-celebration-check">
-        <Check size={56} strokeWidth={3.5} />
-      </span>
-    </div>
+    <section aria-label={label}>
+      <Text fz="xs" c="dimmed" mb={4}>
+        {label}
+      </Text>
+      <Code
+        block
+        mah={240}
+        style={{
+          overflow: 'auto',
+          whiteSpace: 'pre-wrap',
+          overflowWrap: 'anywhere',
+          borderLeft: color && `3px solid var(--mantine-color-${color}-6)`,
+        }}
+      >
+        {value}
+      </Code>
+    </section>
   );
 }
 
@@ -57,121 +47,118 @@ export default function Results({
   useEffect(() => setActive(0), [execution]);
   if (running)
     return (
-      <div className="empty-state execution-pending" role="status">
-        <LoaderCircle className="spin" size={25} />
-        <h3>
-          {execution?.jobState === 'queued'
+      <EmptyState
+        role="status"
+        icon={<Loader size="sm" />}
+        title={
+          execution?.jobState === 'queued'
             ? 'Submission queued'
             : execution?.jobState === 'canceling'
               ? 'Canceling submission…'
               : execution?.mode === 'submit'
                 ? 'Grading your submission…'
-                : 'Running your code…'}
-        </h3>
-        <p>
-          {execution?.jobState
+                : 'Running your code…'
+        }
+        description={
+          execution?.jobState
             ? 'You can leave this page and return to your result.'
-            : 'You can stop this run at any time.'}
-        </p>
-      </div>
+            : 'You can stop this run at any time.'
+        }
+      />
     );
   if (!execution)
     return (
-      <div className="empty-state">
-        <Terminal size={25} />
-        <h3>Try your solution</h3>
-        <p>
-          Run the example to check your approach.
-          <br />
-          Submit to check the full set of cases.
-        </p>
-      </div>
+      <EmptyState
+        icon={<Terminal size={25} />}
+        title="Try your solution"
+        description="Run the example to check your approach. Submit to check the full set of cases."
+      />
     );
   const staleNotice = stale && (
-    <p className="stale-result" role="status">
+    <Text fz="sm" c="yellow" role="status">
       Your code has changed. These results are from the previous run.
-    </p>
+    </Text>
   );
-  if (execution.error || execution.result?.error)
+  const failure = execution.error || execution.result?.error;
+  if (failure)
     return (
-      <div className="execution-error" role="alert">
+      <Stack gap="xs">
         {staleNotice}
-        <h3>
-          <CircleAlert size={19} />{' '}
-          {execution.mode === 'submit' ? 'Submission stopped' : 'Run stopped'}
-        </h3>
-        <pre>{execution.error || execution.result?.error}</pre>
-        <p>Your code is still saved.</p>
-      </div>
+        <Alert
+          color="red"
+          icon={<CircleAlert size={19} />}
+          title={execution.mode === 'submit' ? 'Submission stopped' : 'Run stopped'}
+        >
+          <Code block style={{ whiteSpace: 'pre-wrap' }}>
+            {failure}
+          </Code>
+          <Text fz="sm" mt="xs">
+            Your code is still saved.
+          </Text>
+        </Alert>
+      </Stack>
     );
   const result = execution.result;
   if (!result) return null;
   const passed = result.cases.filter((test) => test.passed).length;
   const success = passed === result.cases.length && result.cases.length > 0;
   const test = result.cases[active] ?? result.cases[0];
-  const outputState =
-    test?.error || test?.passed === false
-      ? 'wrong-output'
-      : test?.passed === true
-        ? 'correct-output'
-        : '';
   return (
-    <div className="result-content">
+    <Stack gap="sm">
       {staleNotice}
-      <div className={`result-heading ${success ? 'success' : 'failure'}`} role="status">
-        {success ? <CircleCheck size={20} /> : <CircleAlert size={20} />}
-        <strong>
+      <Group gap="xs" role="status">
+        {success ? (
+          <CircleCheck size={20} color="var(--mantine-color-teal-5)" />
+        ) : (
+          <CircleAlert size={20} color="var(--mantine-color-red-5)" />
+        )}
+        <Text fw={700} fz="lg" c={success ? 'teal' : 'red'}>
           {success
             ? execution.mode === 'submit'
               ? 'Accepted'
               : 'Example passed'
             : 'Not quite yet'}
-        </strong>
-        <span>
+        </Text>
+        <Text fz="sm" c="dimmed">
           {passed} / {result.cases.length} cases passed
-        </span>
-      </div>
-      <div className="case-tabs" aria-label="Test cases">
+        </Text>
+      </Group>
+      <Group gap={6} aria-label="Test cases">
         {result.cases.map((item, index) => (
-          <button
+          <Button
             key={index}
-            className={`${active === index ? 'active' : ''} ${item.passed ? 'pass' : 'fail'}`}
-            onClick={() => setActive(index)}
+            size="compact-sm"
+            variant={active === index ? 'light' : 'subtle'}
+            color={item.passed ? 'teal' : 'red'}
+            leftSection={item.passed ? <Check size={13} /> : <X size={13} />}
             aria-pressed={active === index}
             aria-label={`Case ${index + 1}: ${item.passed ? 'passed' : 'failed'}`}
             title={item.name}
+            onClick={() => setActive(index)}
           >
-            {item.passed ? <Check size={13} /> : <X size={13} />} Case {index + 1}
-          </button>
+            Case {index + 1}
+          </Button>
         ))}
-      </div>
+      </Group>
       {test && (
-        <div className="case-detail">
-          <section className="value-block" aria-label="Input">
-            <span>Input</span>
-            <pre>{test.input}</pre>
-          </section>
-          <section
-            className={`value-block ${outputState}`}
-            aria-label={test.error ? 'Error' : 'Your Output'}
-          >
-            <span>{test.error ? 'Error' : 'Your Output'}</span>
-            <pre>{test.error ?? test.actual ?? '(no output)'}</pre>
-          </section>
-          {test.expected !== undefined && (
-            <section className="value-block expected-output" aria-label="Expected Output">
-              <span>Expected Output</span>
-              <pre>{test.expected}</pre>
-            </section>
-          )}
-        </div>
+        <Stack gap="xs">
+          <Value label="Input" value={test.input} />
+          <Value
+            label={test.error ? 'Error' : 'Your Output'}
+            value={test.error ?? test.actual ?? '(no output)'}
+            color={test.error || test.passed === false ? 'red' : test.passed ? 'teal' : undefined}
+          />
+          {test.expected !== undefined && <Value label="Expected Output" value={test.expected} />}
+        </Stack>
       )}
       {result.stdout && (
-        <details className="stdout" open>
+        <details open>
           <summary>Console output</summary>
-          <pre>{result.stdout}</pre>
+          <Code block mt="xs" mah={180} style={{ overflow: 'auto', whiteSpace: 'pre-wrap' }}>
+            {result.stdout}
+          </Code>
         </details>
       )}
-    </div>
+    </Stack>
   );
 }

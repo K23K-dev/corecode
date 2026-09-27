@@ -1,20 +1,28 @@
-import type { KeyboardEvent } from 'react';
+import {
+  Badge,
+  Code,
+  EmptyState,
+  Group,
+  List,
+  NavLink,
+  Paper,
+  ScrollArea,
+  Stack,
+  Tabs,
+  Text,
+  Title,
+} from '@mantine/core';
 import { Check, ChevronRight, Code2, FileCode2, History, X } from 'lucide-react';
 import CodeEditor from './CodeEditor';
 import FrontendPreview from './FrontendPreview';
-import type { Exercise } from '../shared/exercises';
-import type { Attempt } from '../lib/progress';
+import type { Problem } from '../schemas/catalog';
+import type { Attempt } from '../schemas/progress';
+import { DIFFICULTY_COLORS } from '../lib/theme';
 
-const PROBLEM_TABS = [
-  { id: 'question', label: 'Question', Icon: FileCode2 },
-  { id: 'solution', label: 'Solution', Icon: Code2 },
-  { id: 'history', label: 'Submissions', Icon: History },
-] as const;
-
-export type ProblemTab = (typeof PROBLEM_TABS)[number]['id'];
+export type ProblemTab = 'question' | 'solution' | 'history';
 
 type ProblemPanelProps = {
-  exercise: Exercise;
+  problem: Problem;
   solved: boolean;
   attempts: Attempt[];
   tab: ProblemTab;
@@ -22,152 +30,132 @@ type ProblemPanelProps = {
   onViewAttempt: (attempt: Attempt) => void;
 };
 
+const STATUS_LABELS = { accepted: 'Accepted', failed: 'Not accepted', error: 'Run error' };
+
 export default function ProblemPanel({
-  exercise,
+  problem,
   solved,
   attempts,
   tab,
   onTabChange,
   onViewAttempt,
 }: ProblemPanelProps) {
-  function navigateTabs(event: KeyboardEvent<HTMLDivElement>) {
-    const index = PROBLEM_TABS.findIndex((item) => item.id === tab);
-    let next: number;
-
-    switch (event.key) {
-      case 'ArrowRight':
-        next = (index + 1) % PROBLEM_TABS.length;
-        break;
-      case 'ArrowLeft':
-        next = (index + PROBLEM_TABS.length - 1) % PROBLEM_TABS.length;
-        break;
-      case 'Home':
-        next = 0;
-        break;
-      case 'End':
-        next = PROBLEM_TABS.length - 1;
-        break;
-      default:
-        return;
-    }
-
-    event.preventDefault();
-    onTabChange(PROBLEM_TABS[next].id);
-    event.currentTarget.querySelectorAll<HTMLButtonElement>('[role="tab"]')[next].focus();
-  }
-
   return (
-    <section className="problem-panel" aria-label="Problem description">
-      <div
-        className="question-tabs"
-        role="tablist"
-        aria-label="Problem details"
-        onKeyDown={navigateTabs}
-      >
-        {PROBLEM_TABS.map(({ id, label, Icon }) => (
-          <button
-            key={id}
-            role="tab"
-            id={`tab-${id}`}
-            aria-controls="question-content"
-            aria-selected={tab === id}
-            tabIndex={tab === id ? 0 : -1}
-            className={tab === id ? 'active' : ''}
-            onClick={() => onTabChange(id)}
-          >
-            <Icon size={16} /> {label}
-            {id === 'history' && attempts.length > 0 && <small>{attempts.length}</small>}
-          </button>
-        ))}
-      </div>
-      <div
-        className="problem-content"
-        id="question-content"
-        role="tabpanel"
-        aria-labelledby={'tab-' + tab}
-      >
-        {tab === 'question' && <Question exercise={exercise} solved={solved} />}
-        {tab === 'solution' && <ReferenceSolution exercise={exercise} />}
-        {tab === 'history' && (
+    <Tabs
+      value={tab}
+      onChange={(value) => value && onTabChange(value as ProblemTab)}
+      keepMounted={false}
+      aria-label="Problem description"
+      flex={1}
+      miw={0}
+      display="flex"
+      style={{ flexDirection: 'column' }}
+    >
+      <Tabs.List>
+        <Tabs.Tab value="question" leftSection={<FileCode2 size={16} />}>
+          Question
+        </Tabs.Tab>
+        <Tabs.Tab value="solution" leftSection={<Code2 size={16} />}>
+          Solution
+        </Tabs.Tab>
+        <Tabs.Tab
+          value="history"
+          leftSection={<History size={16} />}
+          rightSection={attempts.length > 0 && <Badge size="xs">{attempts.length}</Badge>}
+        >
+          Submissions
+        </Tabs.Tab>
+      </Tabs.List>
+      <ScrollArea flex={1} mih={0}>
+        <Tabs.Panel value="question" p="lg">
+          <Question problem={problem} solved={solved} />
+        </Tabs.Panel>
+        <Tabs.Panel value="solution" p="lg">
+          <ReferenceSolution problem={problem} />
+        </Tabs.Panel>
+        <Tabs.Panel value="history" p="lg">
           <SubmissionHistory attempts={attempts} onViewAttempt={onViewAttempt} />
-        )}
-      </div>
-    </section>
+        </Tabs.Panel>
+      </ScrollArea>
+    </Tabs>
   );
 }
 
-function Question({ exercise, solved }: { exercise: Exercise; solved: boolean }) {
+function Question({ problem, solved }: { problem: Problem; solved: boolean }) {
+  // React previews would need a bundler, so those problems show their examples instead.
+  const preview = problem.preview && !['jsx', 'tsx'].includes(problem.extension);
   return (
-    <>
-      <div className="problem-title-row">
-        <h1>{exercise.title}</h1>
-        {solved && <Check size={21} className="solved-label" aria-label="Solved" />}
-      </div>
-      <div className="problem-meta">
-        <span className={'difficulty difficulty-' + exercise.difficulty.toLowerCase()}>
-          {exercise.difficulty}
-        </span>
-        {exercise.topic && exercise.topic !== exercise.language && (
-          <span className="topic-pill">{exercise.topic}</span>
+    <Stack>
+      <Group gap="xs">
+        <Title order={1} size="h3">
+          {problem.title}
+        </Title>
+        {solved && <Check size={21} color="var(--mantine-color-teal-5)" aria-label="Solved" />}
+      </Group>
+      <Group gap="xs">
+        <Badge variant="light" color={DIFFICULTY_COLORS[problem.difficulty]}>
+          {problem.difficulty}
+        </Badge>
+        {problem.topic && problem.topic !== problem.language && (
+          <Badge variant="default">{problem.topic}</Badge>
         )}
-      </div>
-      <p className="problem-prompt">{exercise.prompt}</p>
-      {exercise.preview && (
-        <FrontendPreview key={`${exercise.id}:${exercise.version}`} exercise={exercise} />
-      )}
-      {!exercise.preview &&
-        exercise.examples?.map((example, index) => (
-          <div className="example" data-runtime={exercise.runtime} key={index}>
-            <h2>Example {index + 1}:</h2>
-            <div
-              className={
-                example.inputLabel || example.outputLabel
-                  ? 'example-code example-scenario'
-                  : 'example-code'
-              }
-            >
-              <div>
-                <span>{example.inputLabel ?? 'Input'}:</span>
-                <pre>{example.input}</pre>
-              </div>
-              <div>
-                <span>{example.outputLabel ?? 'Output'}:</span>
-                <pre>{example.output}</pre>
-              </div>
-            </div>
+      </Group>
+      <Text style={{ whiteSpace: 'pre-line' }}>{problem.prompt}</Text>
+      {preview && <FrontendPreview key={`${problem.id}:${problem.version}`} problem={problem} />}
+      {!preview &&
+        problem.examples?.map((example, index) => (
+          <div key={index}>
+            <Title order={2} size="h6" mb={6}>
+              Example {index + 1}:
+            </Title>
+            <Code block>
+              {`${example.inputLabel ?? 'Input'}: ${example.input}\n${example.outputLabel ?? 'Output'}: ${example.output}`}
+            </Code>
           </div>
         ))}
-      {!!exercise.requirements?.length && (
-        <div className="requirements">
-          <h2>Requirements:</h2>
-          <ul>
-            {exercise.requirements.map((item) => (
-              <li key={item}>{item}</li>
+      {!!problem.requirements?.length && (
+        <div>
+          <Title order={2} size="h6" mb={6}>
+            Requirements:
+          </Title>
+          <List size="sm" spacing={4}>
+            {problem.requirements.map((item) => (
+              <List.Item key={item}>{item}</List.Item>
             ))}
-          </ul>
+          </List>
         </div>
       )}
-    </>
+    </Stack>
   );
 }
 
-function ReferenceSolution({ exercise }: { exercise: Exercise }) {
+function ReferenceSolution({ problem }: { problem: Problem }) {
   return (
-    <div className="reference-code">
-      <h1>Reference solution</h1>
-      {exercise.explanation && <p className="solution-explanation">{exercise.explanation}</p>}
-      <CodeEditor code={exercise.referenceCode} language={exercise.language} readOnly />
-      {exercise.solutionAlternatives?.map((alternative) => (
-        <section className="solution-alternative" key={alternative.title}>
-          <h2>{alternative.title}</h2>
-          <p className="solution-explanation">{alternative.explanation}</p>
-          <CodeEditor code={alternative.code} language={exercise.language} readOnly />
+    <Stack>
+      <Title order={1} size="h3">
+        Reference solution
+      </Title>
+      {problem.explanation && <Text>{problem.explanation}</Text>}
+      <Paper withBorder>
+        <CodeEditor code={problem.referenceCode} language={problem.language} readOnly />
+      </Paper>
+      {problem.solutionAlternatives?.map((alternative) => (
+        <Stack key={alternative.title} gap="xs">
+          <Title order={2} size="h5">
+            {alternative.title}
+          </Title>
+          <Text>{alternative.explanation}</Text>
+          <Paper withBorder>
+            <CodeEditor code={alternative.code} language={problem.language} readOnly />
+          </Paper>
           {alternative.complexity && (
-            <p className="solution-complexity">{alternative.complexity}</p>
+            <Text fz="sm" c="dimmed">
+              {alternative.complexity}
+            </Text>
           )}
-        </section>
+        </Stack>
       ))}
-    </div>
+    </Stack>
   );
 }
 
@@ -175,47 +163,33 @@ function SubmissionHistory({
   attempts,
   onViewAttempt,
 }: Pick<ProblemPanelProps, 'attempts' | 'onViewAttempt'>) {
+  if (!attempts.length)
+    return (
+      <EmptyState
+        icon={<History size={25} />}
+        title="No submissions yet"
+        description="Your last 20 submissions for this problem will appear here."
+      />
+    );
   return (
-    <>
-      <h1>Your submissions</h1>
-      {attempts.length ? (
-        <div className="submission-list">
-          {[...attempts].reverse().map((attempt) => (
-            <button
-              key={attempt.id}
-              className="submission-row"
-              onClick={() => onViewAttempt(attempt)}
-            >
-              <span className={attempt.status === 'accepted' ? 'success' : 'failure'}>
-                {attempt.status === 'accepted' ? <Check size={16} /> : <X size={16} />}
-                {attempt.status === 'accepted'
-                  ? 'Accepted'
-                  : attempt.status === 'failed'
-                    ? 'Not accepted'
-                    : 'Run error'}
-              </span>
-              <span>
-                {attempt.passed}/{attempt.total} passed
-              </span>
-              <time dateTime={attempt.at}>
-                {new Date(attempt.at).toLocaleString(undefined, {
-                  month: 'short',
-                  day: 'numeric',
-                  hour: 'numeric',
-                  minute: '2-digit',
-                })}
-              </time>
-              <ChevronRight size={15} />
-            </button>
-          ))}
-        </div>
-      ) : (
-        <div className="empty-state">
-          <History size={25} />
-          <h3>No submissions yet</h3>
-          <p>Your last 20 submissions for this exercise will appear here.</p>
-        </div>
-      )}
-    </>
+    <Stack gap={4}>
+      <Title order={1} size="h3" mb="xs">
+        Your submissions
+      </Title>
+      {[...attempts].reverse().map((attempt) => (
+        <NavLink
+          key={attempt.id}
+          component="button"
+          active
+          variant="subtle"
+          color={attempt.status === 'accepted' ? 'teal' : 'red'}
+          leftSection={attempt.status === 'accepted' ? <Check size={16} /> : <X size={16} />}
+          label={STATUS_LABELS[attempt.status]}
+          description={`${attempt.passed}/${attempt.total} passed · ${new Date(attempt.at).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' })}`}
+          rightSection={<ChevronRight size={15} />}
+          onClick={() => onViewAttempt(attempt)}
+        />
+      ))}
+    </Stack>
   );
 }

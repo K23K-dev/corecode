@@ -1,54 +1,57 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import { Button, Group, NativeSelect, Paper, Text, Title } from '@mantine/core';
 import { RotateCcw } from 'lucide-react';
-import type { Exercise } from '../shared/exercises';
+import type { Problem } from '../schemas/catalog';
+
+/** A standalone page that renders the authored solution and reports its height. */
+function previewDocument(problem: Problem): string {
+  const preview = problem.preview!;
+  const assets = JSON.stringify(preview.assets ?? {});
+  const css = `html, body { margin: 0; }\n${preview.css ?? ''}\n${problem.extension === 'css' ? problem.referenceCode : ''}`;
+  const body = problem.extension === 'html' ? problem.referenceCode : (preview.html ?? '');
+  const solution =
+    problem.extension === 'js'
+      ? `${problem.referenceCode}\nconst candidate = ${problem.entryPoint};\n${preview.setup ?? 'candidate();'}`
+      : '';
+  const script = `
+    document.addEventListener('click', (event) => {
+      if (event.target instanceof Element && event.target.closest('a')) event.preventDefault();
+    }, true);
+    document.addEventListener('submit', (event) => event.preventDefault(), true);
+    const assets = ${assets};
+    const replaceImages = () => {
+      for (const image of document.querySelectorAll('img[src]')) {
+        const source = image.getAttribute('src');
+        if (Object.hasOwn(assets, source) && source !== assets[source]) image.src = assets[source];
+      }
+    };
+    new MutationObserver(replaceImages).observe(document.documentElement, {
+      childList: true, subtree: true, attributes: true, attributeFilter: ['src'],
+    });
+    replaceImages();
+    new ResizeObserver(() => {
+      // The layout height, not the viewport, so short pages can shrink the frame.
+      parent.postMessage({ previewHeight: document.documentElement.offsetHeight }, '*');
+    }).observe(document.documentElement);
+    ${solution}`;
+  // Keep authored text from closing the style or script element early.
+  const safe = (text: string) => text.replace(/<\//g, '<\\/');
+  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${safe(css)}</style></head><body>${body}<script type="module">${safe(script)}</script></body></html>`;
+}
 
 /** Displays the authored target, never the learner's editor contents. */
-export default function FrontendPreview({ exercise }: { exercise: Exercise }) {
-  const frame = useRef<HTMLIFrameElement>(null);
+export default function FrontendPreview({ problem }: { problem: Problem }) {
   const canvas = useRef<HTMLDivElement>(null);
-  const [document, setDocument] = useState<string>();
-  const [error, setError] = useState(false);
-  const [ready, setReady] = useState(false);
-  const [attempt, setAttempt] = useState(0);
-  const [reset, setReset] = useState(0);
-  const [height, setHeight] = useState(240);
+  const frame = useRef<HTMLIFrameElement>(null);
   const [availableWidth, setAvailableWidth] = useState(600);
   const [width, setWidth] = useState(0);
-  const widths = exercise.preview?.widths ?? [];
+  const [height, setHeight] = useState(240);
+  const [reset, setReset] = useState(0);
+  const widths = problem.preview?.widths ?? [];
   const viewportWidth = width || availableWidth;
   const scale = Math.min(1, availableWidth / viewportWidth);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    const timer = window.setTimeout(() => controller.abort(), 15_000);
-    let active = true;
-    setError(false);
-    setReady(false);
-    const query = new URLSearchParams({
-      problemId: exercise.id,
-      problemVersion: exercise.version,
-    });
-    fetch('/api/preview?' + query, { signal: controller.signal, credentials: 'same-origin' })
-      .then(async (response) => {
-        if (!response.ok) throw new Error('Preview unavailable');
-        const result = await response.json();
-        if (typeof result.document !== 'string' || !result.document) {
-          throw new Error('Preview unavailable');
-        }
-        if (active) setDocument(result.document);
-      })
-      .catch(() => {
-        if (active) setError(true);
-      })
-      .finally(() => window.clearTimeout(timer));
-    return () => {
-      active = false;
-      window.clearTimeout(timer);
-      controller.abort();
-    };
-  }, [exercise.id, exercise.version, attempt]);
 
   useEffect(() => {
     const observer = new ResizeObserver(([entry]) => {
@@ -59,112 +62,80 @@ export default function FrontendPreview({ exercise }: { exercise: Exercise }) {
   }, []);
 
   useEffect(() => {
-    function receive(event: MessageEvent) {
-      const data = event.data;
-      if (
-        !frame.current ||
-        event.source !== frame.current.contentWindow ||
-        data?.type !== 'code-practice-preview' ||
-        data.problemId !== exercise.id ||
-        data.problemVersion !== exercise.version
-      )
-        return;
-      if (data.status === 'error') setError(true);
-      if (data.status === 'ready') {
-        setReady(true);
-        if (Number.isFinite(data.height)) setHeight(Math.max(160, Math.min(1200, data.height)));
-      }
-    }
+    const receive = (event: MessageEvent) => {
+      const reported = (event.data as { previewHeight?: unknown } | null)?.previewHeight;
+      if (event.source === frame.current?.contentWindow && typeof reported === 'number')
+        setHeight(Math.max(160, Math.min(1200, Math.ceil(reported))));
+    };
     window.addEventListener('message', receive);
     return () => window.removeEventListener('message', receive);
-  }, [exercise.id, exercise.version]);
+  }, []);
 
-  useEffect(() => {
-    if (!document || ready || error) return;
-    const timer = window.setTimeout(() => setError(true), 10_000);
-    return () => window.clearTimeout(timer);
-  }, [document, ready, error, reset]);
+  if (!problem.preview) return null;
 
   return (
-    <section className="frontend-preview" aria-label="Target preview">
-      <div className="frontend-preview-toolbar">
-        <h2>Target preview</h2>
-        <div className="frontend-preview-controls">
+    <section aria-label="Target preview">
+      <Group justify="space-between" mb="xs">
+        <Title order={2} size="h6">
+          Target preview
+        </Title>
+        <Group gap="xs">
           {widths.length > 0 && (
-            <select
+            <NativeSelect
+              size="xs"
               aria-label="Preview width"
-              value={width}
-              onChange={(event) => setWidth(Number(event.target.value))}
-            >
-              <option value={0}>Fit</option>
-              {widths.map((value) => (
-                <option key={value} value={value}>
-                  {value}px
-                </option>
-              ))}
-            </select>
+              value={String(width)}
+              onChange={(event) => setWidth(Number(event.currentTarget.value))}
+              data={[
+                { value: '0', label: 'Fit' },
+                ...widths.map((value) => ({ value: String(value), label: `${value}px` })),
+              ]}
+            />
           )}
-          {scale < 1 && <span className="frontend-preview-scale">{Math.round(scale * 100)}%</span>}
-          <button
-            type="button"
-            className="button quiet"
+          {scale < 1 && (
+            <Text fz="xs" c="dimmed">
+              {Math.round(scale * 100)}%
+            </Text>
+          )}
+          <Button
+            size="compact-sm"
+            variant="subtle"
+            color="gray"
+            leftSection={<RotateCcw size={14} />}
             aria-label="Reset target preview"
-            disabled={!document || error}
-            onClick={() => {
-              setReady(false);
-              setHeight(240);
-              setReset((value) => value + 1);
-            }}
+            onClick={() => setReset((value) => value + 1)}
           >
-            <RotateCcw size={14} /> Reset
-          </button>
-        </div>
-      </div>
-      <div className="frontend-preview-stage">
+            Reset
+          </Button>
+        </Group>
+      </Group>
+      {/* The target is authored for a light page. */}
+      <Paper withBorder bg="white" c="dark.9" p="md" style={{ overflow: 'hidden' }}>
         <div ref={canvas}>
-          {error ? (
-            <div className="frontend-preview-status" role="alert">
-              <p>The target preview could not be loaded.</p>
-              <button
-                type="button"
-                className="button secondary"
-                onClick={() => {
-                  setDocument(undefined);
-                  setReset((value) => value + 1);
-                  setAttempt((value) => value + 1);
-                }}
-              >
-                Retry preview
-              </button>
-            </div>
-          ) : (
-            <>
-              {!ready && (
-                <p className="frontend-preview-status" role="status">
-                  Loading target preview…
-                </p>
-              )}
-              {document && (
-                <div
-                  className="frontend-preview-viewport"
-                  style={{ height: height * scale, width: viewportWidth * scale }}
-                >
-                  <iframe
-                    key={reset}
-                    ref={frame}
-                    title={`Target preview: ${exercise.title}`}
-                    sandbox="allow-scripts allow-forms"
-                    referrerPolicy="no-referrer"
-                    srcDoc={document}
-                    style={{ width: viewportWidth, height, transform: `scale(${scale})` }}
-                  />
-                </div>
-              )}
-            </>
-          )}
+          <div
+            style={{ width: viewportWidth * scale, height: height * scale, marginInline: 'auto' }}
+          >
+            {/* Scripts run in an opaque origin: no access to this page, cookies, or storage. */}
+            <iframe
+              key={reset}
+              ref={frame}
+              title="Target preview"
+              sandbox="allow-scripts"
+              srcDoc={previewDocument(problem)}
+              style={{
+                width: viewportWidth,
+                height,
+                border: 0,
+                transform: `scale(${scale})`,
+                transformOrigin: 'top left',
+              }}
+            />
+          </div>
         </div>
-      </div>
-      <p className="frontend-preview-caption">{exercise.preview?.caption}</p>
+      </Paper>
+      <Text fz="sm" c="dimmed" mt="xs">
+        {problem.preview.caption}
+      </Text>
     </section>
   );
 }

@@ -12,7 +12,6 @@
     "incremental": true,
     "isolatedModules": true,
     "resolveJsonModule": true,
-    "allowImportingTsExtensions": true,
     "esModuleInterop": true,
     "types": ["node"],
     "plugins": [

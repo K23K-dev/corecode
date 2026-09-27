@@ -5,3 +5,7 @@
 !judge/graders/javascript/**
 !judge/graders/python/
 !judge/graders/python/**
+
+**/node_modules
+**/__pycache__
+**/*.pyc

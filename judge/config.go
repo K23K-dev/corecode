@@ -5,19 +5,16 @@ import (
 	"net"
 	"net/url"
 	"os"
-	"regexp"
 	"runtime"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
 type config struct {
 	database        *pgxpool.Config
-	leader          *pgx.ConnConfig
 	dockerHost      string
 	pythonImage     string
 	javascriptImage string
@@ -26,10 +23,6 @@ type config struct {
 
 func loadConfig() (config, error) {
 	database, err := databaseConfig(os.Getenv("POSTGRES_URL"))
-	if err != nil {
-		return config{}, err
-	}
-	leader, err := leaderDatabaseConfig(os.Getenv("POSTGRES_URL"))
 	if err != nil {
 		return config{}, err
 	}
@@ -51,31 +44,14 @@ func loadConfig() (config, error) {
 	}
 	return config{
 		database:        database,
-		leader:          leader,
 		dockerHost:      dockerHost,
-		pythonImage:     configuredValue("JUDGE_PYTHON_IMAGE", "cp-practice-python:2"),
-		javascriptImage: configuredValue("JUDGE_JAVASCRIPT_IMAGE", "coding-practice-js:2"),
+		pythonImage:     configuredValue("JUDGE_PYTHON_IMAGE", "cp-practice-python:3"),
+		javascriptImage: configuredValue("JUDGE_JAVASCRIPT_IMAGE", "coding-practice-js:4"),
 		sandboxDeadline: deadline,
 	}, nil
 }
 
-// Session advisory locks require a direct connection. Reparse the normalized
-// URL so TLS server names and SSL fallback configuration match that endpoint.
-func leaderDatabaseConfig(value string) (*pgx.ConnConfig, error) {
-	u, err := url.Parse(strings.TrimSpace(value))
-	if err != nil {
-		return nil, errors.New("Cannot configure the judge's direct Neon connection.")
-	}
-	u.Host = net.JoinHostPort(strings.Replace(strings.ToLower(u.Hostname()), "-pooler.", ".", 1), "5432")
-	direct, err := databaseConfig(u.String())
-	if err != nil {
-		return nil, err
-	}
-	return direct.ConnConfig, nil
-}
-
-// The fixed local listener excludes a second judge before any Docker cleanup.
-// That ownership guarantee does not extend to engines shared by other hosts.
+// Startup removes this engine's leftover grading containers, so it must be local.
 func localDockerHost(value string) bool {
 	u, err := url.Parse(value)
 	if err != nil || u.User != nil || u.RawQuery != "" || u.Fragment != "" {
@@ -94,6 +70,19 @@ func localDockerHost(value string) bool {
 	}
 }
 
+func judgeToken() (string, error) {
+	token := os.Getenv("JUDGE_TOKEN")
+	if len(token) < 32 || len(token) > 256 {
+		return "", errors.New("JUDGE_TOKEN must contain 32–256 printable ASCII characters.")
+	}
+	for _, c := range token {
+		if c < 33 || c > 126 {
+			return "", errors.New("JUDGE_TOKEN must contain 32–256 printable ASCII characters.")
+		}
+	}
+	return token, nil
+}
+
 func configuredValue(name, fallback string) string {
 	if value := strings.TrimSpace(os.Getenv(name)); value != "" {
 		return value
@@ -106,58 +95,25 @@ func databaseConfig(value string) (*pgxpool.Config, error) {
 	if value == "" {
 		return nil, errors.New("POSTGRES_URL is required. Add your Neon connection string to .env.")
 	}
-	invalid := errors.New("POSTGRES_URL must use a Neon PostgreSQL endpoint with SSL enabled.")
+	invalid := errors.New("POSTGRES_URL must be a PostgreSQL URL with SSL, for example sslmode=require.")
 	u, err := url.Parse(value)
 	if err != nil {
 		return nil, invalid
 	}
-	password, hasPassword := u.User.Password()
-	host := strings.ToLower(u.Hostname())
-	neonHost := regexp.MustCompile(`^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+neon\.tech$`)
-	if (u.Scheme != "postgres" && u.Scheme != "postgresql") || !neonHost.MatchString(host) ||
-		(u.Port() != "" && u.Port() != "5432") || u.User.Username() == "" ||
-		!hasPassword || password == "" || len(u.Path) <= 1 || u.Fragment != "" {
-		return nil, invalid
-	}
-	query, err := url.ParseQuery(u.RawQuery)
-	if err != nil {
-		return nil, invalid
-	}
-	seen := make(map[string]bool)
-	for key, values := range query {
-		key = strings.ToLower(key)
-		if seen[key] || len(values) != 1 {
-			return nil, invalid
-		}
-		seen[key] = true
-		switch key {
-		case "host", "hostaddr", "port", "user", "password", "database", "dbname", "ssl", "service", "servicefile":
-			return nil, invalid
-		}
-	}
-	switch query.Get("sslmode") {
+	switch u.Query().Get("sslmode") {
 	case "require", "verify-ca", "verify-full":
 	default:
 		return nil, invalid
 	}
-	// A URL without a port must not inherit PGPORT; service files may override URLs.
-	if os.Getenv("PGSERVICE") != "" || os.Getenv("PGSERVICEFILE") != "" {
-		return nil, errors.New("Configure the judge with POSTGRES_URL instead of PostgreSQL service files.")
+	// Without an explicit port, pgx would use this machine's PGPORT.
+	if u.Port() == "" {
+		u.Host = net.JoinHostPort(u.Hostname(), "5432")
 	}
-	u.Host = net.JoinHostPort(host, "5432")
 	database, err := pgxpool.ParseConfig(u.String())
 	if err != nil {
 		return nil, invalid // Parser errors may include the private connection string.
 	}
 	connection := database.ConnConfig
-	if connection.Host != host || connection.Port != 5432 || connection.TLSConfig == nil {
-		return nil, invalid
-	}
-	for _, fallback := range connection.Fallbacks {
-		if fallback.Host != host || fallback.Port != 5432 || fallback.TLSConfig == nil {
-			return nil, invalid
-		}
-	}
 	database.MaxConns, database.MinConns, database.MinIdleConns = 4, 0, 0
 	database.MaxConnIdleTime = 10 * time.Second
 	connection.ConnectTimeout = 5 * time.Second

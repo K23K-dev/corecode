@@ -7,85 +7,88 @@ import (
 	"errors"
 	"io"
 	"log"
-	"regexp"
 	"sync"
 	"time"
 
+	"connectrpc.com/connect"
 	judgev1 "github.com/K23K-dev/corecode/judge/gen"
 	"github.com/containerd/errdefs"
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
 	"github.com/moby/moby/client"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
 const maxExecutionOutput = 512000
 
 var errOutputLimit = errors.New("Execution output exceeded 512 KB.")
 
-var imageIDPattern = regexp.MustCompile(`^sha256:[a-f0-9]{64}$`)
-var executionNamePattern = regexp.MustCompile(`^cp-job-[A-Za-z0-9-]{16,64}$`)
+// Every grading container carries this label, so a new judge process can remove
+// containers that an earlier process on this Docker engine left behind.
+const judgeLabel = "code-practice.judge"
 
-// One executor owns capacity for both temporary runs and queued submissions.
+// One executor owns two execution slots shared by temporary runs and queued submissions.
 type executor struct {
-	ctx        context.Context
-	docker     *client.Client
-	mu         sync.Mutex
-	images     map[string]string
-	active     int
-	blocked    bool
-	draining   bool
-	reconciled bool
-	scope      string
-	instance   string
-	work       sync.WaitGroup
-}
-
-type executionSlot struct {
-	executor *executor
+	ctx      context.Context
+	docker   *client.Client
+	images   map[string]string // runtime → grader image
 	mu       sync.Mutex
-	consumed bool
-	cleaned  bool // Read after execute, release, or hold returns.
+	ready    bool
+	draining bool
+	active   int
+	work     sync.WaitGroup
 }
 
-func newExecutor(ctx context.Context, docker *client.Client) *executor {
-	return &executor{ctx: ctx, docker: docker, images: make(map[string]string), instance: newJobID()}
+func newExecutor(ctx context.Context, docker *client.Client, cfg config) *executor {
+	return &executor{ctx: ctx, docker: docker, images: map[string]string{
+		"python": cfg.pythonImage, "sql": cfg.pythonImage, "shell": cfg.pythonImage, "javascript": cfg.javascriptImage,
+	}}
 }
 
-func (e *executor) refreshImages(ctx context.Context, cfg config) bool {
-	e.mu.Lock()
-	python, javascript := e.images["python"], e.images["javascript"]
-	e.mu.Unlock()
-	if python == "" {
-		python, javascript = cfg.pythonImage, cfg.javascriptImage
+// prepare waits until Docker and both grader images are available, then removes
+// containers left by an earlier judge process. It returns false if the judge stops first.
+func (e *executor) prepare(ctx context.Context) bool {
+	for waiting := false; ; waiting = true {
+		if err := e.removeLeftovers(ctx); err == nil {
+			e.mu.Lock()
+			e.ready = true
+			e.mu.Unlock()
+			return true
+		} else if !waiting {
+			log.Print("Waiting for Docker and the grader images.")
+		}
+		select {
+		case <-ctx.Done():
+			return false
+		case <-time.After(2 * time.Second):
+		}
 	}
-	p, err := e.docker.ImageInspect(ctx, python)
-	if err != nil || p.ID == "" || p.Os != "linux" {
-		return false
+}
+
+func (e *executor) removeLeftovers(ctx context.Context) error {
+	for _, image := range e.images {
+		if inspected, err := e.docker.ImageInspect(ctx, image); err != nil || inspected.Os != "linux" {
+			return errors.New("a grader image is unavailable")
+		}
 	}
-	j, err := e.docker.ImageInspect(ctx, javascript)
-	if err != nil || j.ID == "" || j.Os != "linux" {
-		return false
+	listed, err := e.docker.ContainerList(ctx, client.ContainerListOptions{
+		All: true, Filters: make(client.Filters).Add("label", judgeLabel+"=1"),
+	})
+	if err != nil {
+		return err
 	}
+	for _, item := range listed.Items {
+		_, err := e.docker.ContainerRemove(ctx, item.ID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true})
+		if err != nil && !errdefs.IsNotFound(err) {
+			return err
+		}
+	}
+	return nil
+}
+
+func (e *executor) available() bool {
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	// Once resolved, retagging an image cannot change this process's runtime.
-	if e.images["python"] == "" {
-		e.images = map[string]string{"python": p.ID, "sql": p.ID, "shell": p.ID, "javascript": j.ID}
-	}
-	return true
-}
-
-func (e *executor) ready() bool {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.runnable() && !e.draining
-}
-
-// Called with e.mu held; existing reservations can finish while admission drains.
-func (e *executor) runnable() bool {
-	return !e.blocked && e.reconciled && e.ctx.Err() == nil && len(e.images) != 0
+	return e.ready && !e.draining && e.ctx.Err() == nil
 }
 
 func (e *executor) beginDrain() {
@@ -95,99 +98,46 @@ func (e *executor) beginDrain() {
 }
 
 func (e *executor) imageFor(runtime string) (string, error) {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	image := e.images[runtime]
-	if !e.runnable() || e.draining || image == "" {
-		return "", status.Error(codes.Unavailable, "The execution runtime is unavailable.")
+	if image := e.images[runtime]; image != "" && e.available() {
+		return image, nil
 	}
-	return image, nil
+	return "", rpcError(connect.CodeUnavailable, "The execution runtime is unavailable.")
 }
 
-func (e *executor) reserve() (*executionSlot, error) {
+// acquire takes one of the two execution slots; every successful acquire needs one release.
+func (e *executor) acquire() error {
 	e.mu.Lock()
 	defer e.mu.Unlock()
 	switch {
-	case !e.runnable() || e.draining:
-		return nil, status.Error(codes.Unavailable, "The execution runtime is unavailable.")
+	case !e.ready || e.draining || e.ctx.Err() != nil:
+		return rpcError(connect.CodeUnavailable, "The execution runtime is unavailable.")
 	case e.active >= 2:
-		return nil, status.Error(codes.ResourceExhausted, "Both execution slots are busy. Try again shortly.")
-	default:
-		e.active++
-		e.work.Add(1)
+		return rpcError(connect.CodeResourceExhausted, "Both execution slots are busy. Try again shortly.")
 	}
-	return &executionSlot{executor: e}, nil
+	e.active++
+	e.work.Add(1)
+	return nil
 }
 
-// Release an unused reservation (for example, when a queue claim finds no job).
-func (s *executionSlot) release() {
-	s.finishUnused(true)
+func (e *executor) release() {
+	e.mu.Lock()
+	e.active--
+	e.mu.Unlock()
+	e.work.Done()
 }
 
-// Retain capacity when recovery could not confirm the old container is gone.
-func (s *executionSlot) hold() {
-	s.finishUnused(false)
-}
-
-func (s *executionSlot) finishUnused(cleaned bool) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	if !s.consumed {
-		s.consumed = true
-		s.cleaned = cleaned
-		s.executor.mu.Lock()
-		if cleaned {
-			s.executor.active--
-		} else {
-			s.executor.blocked = true
-		}
-		s.executor.mu.Unlock()
-		s.executor.work.Done()
-	}
-}
-
-func (s *executionSlot) execute(ctx context.Context, input executionInput) (result *judgev1.RunResult, err error) {
-	s.mu.Lock()
-	if s.consumed {
-		s.mu.Unlock()
-		return nil, status.Error(codes.Internal, "The execution slot was already used.")
-	}
-	s.consumed = true
-	s.mu.Unlock()
-	e := s.executor
-
+// run grades one payload in a fresh, locked-down container and always removes it.
+func (e *executor) run(ctx context.Context, input executionInput) (*judgev1.RunResult, error) {
 	started := time.Now()
 	runCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
 	stop := context.AfterFunc(e.ctx, cancel)
 	defer func() { stop(); cancel() }()
-	name := input.name
-	if name == "" {
-		name = "cp-job-" + rand.Text()
-	}
-	containerID := name
-	creationAttempted, creationUncertain := false, false
-	defer func() {
-		removed := !creationAttempted || e.removeContainer(context.Background(), containerID, name, false)
-		e.mu.Lock()
-		s.cleaned = removed && !creationUncertain
-		if s.cleaned {
-			e.active--
-		} else {
-			// A timed-out create can still finish inside Docker after our request ends.
-			e.blocked = true
-			result, err = nil, status.Error(codes.Unavailable, "Docker cleanup could not be confirmed. Restart the judge after checking Docker.")
-			log.Print("Execution disabled: container creation or cleanup could not be confirmed.")
-		}
-		e.mu.Unlock()
-		e.work.Done()
-	}()
-
 	failure := func(cause error) (*judgev1.RunResult, error) {
 		if ctx.Err() != nil {
-			return nil, status.FromContextError(ctx.Err()).Err()
+			return nil, contextError(ctx.Err())
 		}
 		if e.ctx.Err() != nil {
-			return nil, status.Error(codes.Unavailable, "The judge is shutting down.")
+			return nil, rpcError(connect.CodeUnavailable, "The judge is shutting down.")
 		}
 		message := ""
 		if errors.Is(cause, errOutputLimit) {
@@ -198,54 +148,30 @@ func (s *executionSlot) execute(ctx context.Context, input executionInput) (resu
 		if message != "" {
 			return &judgev1.RunResult{Error: &message, DurationMs: float64(time.Since(started).Milliseconds())}, nil
 		}
-		return nil, status.Error(codes.Unavailable, "The execution container failed. Try again shortly.")
+		return nil, rpcError(connect.CodeUnavailable, "The execution container failed. Try again shortly.")
 	}
-	if runCtx.Err() != nil {
-		return failure(runCtx.Err())
-	}
-	e.mu.Lock()
-	runnable := e.runnable()
-	e.mu.Unlock()
-	if !runnable {
-		return nil, status.Error(codes.Unavailable, "The execution runtime is unavailable.")
-	}
-	image := input.imageID
-	if image == "" {
-		image, err = e.imageFor(input.runtime)
-		if err != nil {
-			return nil, err
-		}
-	}
-	if !imageIDPattern.MatchString(image) || !executionNamePattern.MatchString(name) {
-		return nil, status.Error(codes.FailedPrecondition, "The saved execution configuration is invalid.")
-	}
-	// Queued work may use an older accepted image after this process's configured
-	// tag changes. Inspect and execute that immutable ID, without pulling images.
-	inspected, inspectErr := e.docker.ImageInspect(runCtx, image)
-	if inspectErr != nil || inspected.ID != image || inspected.Os != "linux" || inspected.Config == nil || len(inspected.Config.Entrypoint) == 0 {
-		return failure(inspectErr)
-	}
-	if runCtx.Err() != nil {
-		return failure(runCtx.Err())
-	}
-	// Finish Docker's setup handshake even if Stop arrives. Abandoning create
-	// can leave a late container behind; interrupted attach can lose its socket.
-	setupCtx, finishSetup := context.WithTimeout(context.WithoutCancel(runCtx), 10*time.Second)
-	defer finishSetup()
-	creationAttempted = true
-	options := executionContainer(image, name, inspected.Config.Entrypoint)
-	options.Config.Labels["code-practice.scope"] = e.scope
-	options.Config.Labels["code-practice.instance"] = e.instance
-	created, err := e.docker.ContainerCreate(setupCtx, options)
-	if err != nil {
-		creationUncertain = true
+
+	image := e.images[input.runtime]
+	inspected, err := e.docker.ImageInspect(runCtx, image)
+	if err != nil || inspected.Config == nil || len(inspected.Config.Entrypoint) == 0 {
 		return failure(err)
 	}
-	containerID = created.ID
-	if runCtx.Err() != nil {
-		return failure(runCtx.Err())
+	name := input.name
+	if name == "" {
+		name = "cp-job-" + rand.Text()
 	}
-	attachment, err := e.attach(setupCtx, containerID)
+	// Removing by name also covers a create that finished in Docker after timing out here.
+	defer e.remove(name)
+	// Finish Docker's setup handshake even if Stop arrives, so no half-made container remains.
+	setupCtx, finishSetup := context.WithTimeout(context.WithoutCancel(runCtx), 10*time.Second)
+	defer finishSetup()
+	created, err := e.docker.ContainerCreate(setupCtx, executionContainer(image, name, inspected.Config.Entrypoint))
+	if err != nil {
+		return failure(err)
+	}
+	attachment, err := e.docker.ContainerAttach(setupCtx, created.ID, client.ContainerAttachOptions{
+		Stream: true, Stdin: true, Stdout: true, Stderr: true,
+	})
 	if err != nil {
 		return failure(err)
 	}
@@ -263,7 +189,7 @@ func (s *executionSlot) execute(ctx context.Context, input executionInput) (resu
 		_, copyErr := stdcopy.StdCopy(output, outputCounter{output}, attachment.Reader)
 		drained <- copyErr
 	}()
-	if _, err = e.docker.ContainerStart(runCtx, containerID, client.ContainerStartOptions{}); err != nil {
+	if _, err = e.docker.ContainerStart(runCtx, created.ID, client.ContainerStartOptions{}); err != nil {
 		return failure(err)
 	}
 	sent := make(chan error, 1)
@@ -276,7 +202,7 @@ func (s *executionSlot) execute(ctx context.Context, input executionInput) (resu
 	}()
 	// The SDK's result channel is unbuffered. Always receive it, even if the RPC
 	// is canceled first, so its wait goroutine cannot remain blocked on delivery.
-	wait := e.docker.ContainerWait(runCtx, containerID, client.ContainerWaitOptions{Condition: container.WaitConditionNotRunning})
+	wait := e.docker.ContainerWait(runCtx, created.ID, client.ContainerWaitOptions{Condition: container.WaitConditionNotRunning})
 	type exit struct {
 		response container.WaitResponse
 		err      error
@@ -317,7 +243,7 @@ func (s *executionSlot) execute(ctx context.Context, input executionInput) (resu
 		return failure(runCtx.Err())
 	}
 	if state.StatusCode != 0 {
-		inspected, inspectErr := e.docker.ContainerInspect(runCtx, containerID, client.ContainerInspectOptions{})
+		inspected, inspectErr := e.docker.ContainerInspect(runCtx, created.ID, client.ContainerInspectOptions{})
 		if inspectErr == nil && inspected.Container.State != nil && inspected.Container.State.OOMKilled {
 			message := "Execution exceeded its memory limit."
 			return &judgev1.RunResult{Error: &message, DurationMs: float64(time.Since(started).Milliseconds())}, nil
@@ -327,38 +253,17 @@ func (s *executionSlot) execute(ctx context.Context, input executionInput) (resu
 	return parseExecutionResult(output.stdout.Bytes(), input.caseCount)
 }
 
-func (e *executor) attach(ctx context.Context, id string) (client.ContainerAttachResult, error) {
-	type response struct {
-		attachment client.ContainerAttachResult
-		err        error
-	}
-	attached := make(chan response)
-	go func() {
-		a, err := e.docker.ContainerAttach(ctx, id, client.ContainerAttachOptions{
-			Stream: true, Stdin: true, Stdout: true, Stderr: true,
-		})
-		select {
-		case attached <- response{a, err}:
-		case <-ctx.Done():
-			if err == nil {
-				a.Close()
-			}
-		}
-	}()
-	select {
-	case result := <-attached:
-		return result.attachment, result.err
-	case <-ctx.Done():
-		// The SDK's HTTP upgrade can ignore cancellation after dialing. Stop
-		// admission so an unresponsive daemon cannot accumulate stuck attaches.
-		e.mu.Lock()
-		e.blocked = true
-		e.mu.Unlock()
-		log.Print("Execution disabled: Docker attachment was interrupted. Restart the judge.")
-		return client.ContainerAttachResult{}, ctx.Err()
+func (e *executor) remove(name string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_, err := e.docker.ContainerRemove(ctx, name, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true})
+	if err != nil && !errdefs.IsNotFound(err) {
+		log.Print("A grading container could not be removed; the next judge start removes it.")
 	}
 }
 
+// No network, read-only root, no capabilities, 1 GiB memory, 2 CPUs, 256 processes,
+// and a hard kill at 25 s even if the judge itself stops watching.
 func executionContainer(image, name string, command []string) client.ContainerCreateOptions {
 	processLimit := int64(256)
 	return client.ContainerCreateOptions{
@@ -368,7 +273,7 @@ func executionContainer(image, name string, command []string) client.ContainerCr
 			OpenStdin: true, StdinOnce: true, AttachStdin: true, AttachStdout: true, AttachStderr: true,
 			NetworkDisabled: true, Env: []string{"HOME=/work", "TMPDIR=/tmp"},
 			Entrypoint: append([]string{"/usr/bin/timeout", "--signal=KILL", "25s"}, command...),
-			Labels:     map[string]string{"code-practice.runner": "1", "code-practice.judge": "1", "code-practice.execution": name},
+			Labels:     map[string]string{judgeLabel: "1"},
 		},
 		HostConfig: &container.HostConfig{
 			NetworkMode: "none", ReadonlyRootfs: true, CapDrop: []string{"ALL"},
@@ -381,45 +286,6 @@ func executionContainer(image, name string, command []string) client.ContainerCr
 			},
 		},
 	}
-}
-
-func (e *executor) removeContainer(parent context.Context, id, name string, legacy bool) bool {
-	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
-	defer cancel()
-	for {
-		inspected, err := e.docker.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
-		if errdefs.IsNotFound(err) {
-			return true
-		}
-		if err == nil {
-			c := inspected.Container
-			if c.Config == nil || c.Name != "/"+name || c.Config.Labels["code-practice.execution"] != name || c.Config.Labels["code-practice.judge"] != "1" || c.Config.Labels["code-practice.runner"] != "1" {
-				return false
-			}
-			scope := c.Config.Labels["code-practice.scope"]
-			if scope != e.scope && !(legacy && scope == "") {
-				return false
-			}
-			// Remove the inspected ID, never a broad label selection or a reused name.
-			_, _ = e.docker.ContainerRemove(ctx, c.ID, client.ContainerRemoveOptions{Force: true, RemoveVolumes: true})
-		}
-		select {
-		case <-ctx.Done():
-			return false
-		case <-time.After(100 * time.Millisecond):
-		}
-	}
-}
-
-func (e *executor) recoverCleanup(name string) bool {
-	// Only the lease-fenced queue calls this with a recorded attempt name.
-	removed := executionNamePattern.MatchString(name) && e.removeContainer(context.Background(), name, name, true)
-	if !removed {
-		e.mu.Lock()
-		e.blocked = true
-		e.mu.Unlock()
-	}
-	return removed
 }
 
 // StdCopy calls both writers sequentially. Count stderr but retain only stdout,

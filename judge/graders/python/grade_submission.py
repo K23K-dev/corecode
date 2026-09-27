@@ -1,54 +1,39 @@
 """Grades Python, SQL, and shell submissions. Run only inside the restricted practice container."""
 import ast
 import contextlib
+import copy
 import io
 import json
-import re
+import math
+import sqlite3
 import sys
 import time
 import types
 
 MAX_REQUEST_BYTES = 1024 * 1024
-MAX_CODE_BYTES = 50 * 1024
 
 
 def _request_spec(job):
     """Protocol v2 receives its trusted grading specification from the server."""
-    if not isinstance(job, dict) or job.get('protocolVersion') != 2:
+    if job.get('protocolVersion') != 2:
         raise ValueError('Runner protocol version 2 is required.')
-    if (not isinstance(job.get('problemId'), str) or not job['problemId']
-            or len(job['problemId']) > 200):
-        raise ValueError('A problem ID is required.')
-    if (not isinstance(job.get('problemVersion'), str)
-            or not re.fullmatch(r'[a-f0-9]{64}', job['problemVersion'])):
-        raise ValueError('A valid problem version is required.')
-    spec = job.get('spec')
-    if not isinstance(spec, dict) or spec.get('runtime') not in ('python', 'sql', 'shell'):
+    spec = job['spec']
+    runtime = spec.get('runtime')
+    if runtime not in ('python', 'sql', 'shell'):
         raise ValueError('A trusted native grading specification is required.')
-    cases = spec.get('cases')
-    if not isinstance(cases, list) or not 1 <= len(cases) <= 32:
-        raise ValueError('The grading specification must contain 1 to 32 cases.')
-    for case in cases:
-        if (not isinstance(case, dict) or not isinstance(case.get('name'), str)
-                or not isinstance(case.get('expected'), str)):
-            raise ValueError('The grading specification contains an invalid case.')
-        if spec['runtime'] == 'python':
+    for case in spec['cases']:
+        if runtime == 'python':
             if 'code' in case:
                 valid = isinstance(case['code'], str)
             else:
                 valid = (isinstance(case.get('args'), str)
                          and isinstance(case.get('entryPoint'), str))
-            if not valid:
-                raise ValueError('The Python grading case is incomplete.')
-        elif spec['runtime'] == 'sql':
-            if not isinstance(case.get('setup'), str) or not isinstance(case.get('rows'), list):
-                raise ValueError('The SQL grading case is incomplete.')
-        elif not isinstance(case.get('verify'), str):
-            raise ValueError('The shell grading case is incomplete.')
-    if not isinstance(job.get('code'), str) or len(job['code'].encode('utf-8')) > MAX_CODE_BYTES:
-        raise ValueError('Code must be text of at most 50 KiB.')
-    if job.get('mode', 'example') not in ('example', 'run', 'submit'):
-        raise ValueError('Unknown execution mode.')
+        elif runtime == 'sql':
+            valid = isinstance(case.get('setup'), str) and isinstance(case.get('rows'), list)
+        else:
+            valid = isinstance(case.get('verify'), str)
+        if not valid:
+            raise ValueError('The grading specification contains an incomplete case.')
     return spec
 
 
@@ -67,7 +52,6 @@ def exact(actual, expected):
     if isinstance(expected, dict):
         return actual.keys() == expected.keys() and all(exact(actual[k], expected[k]) for k in expected)
     if isinstance(expected, float):
-        import math
         return math.isclose(actual, expected, rel_tol=1e-7, abs_tol=1e-9)
     return actual == expected
 
@@ -169,7 +153,6 @@ def grade_python_case(code, case, scientific):
         return repr(scope.get('actual', 'Behavior checks passed'))[:4000]
     args = ast.literal_eval(case['args'])
     expected = ast.literal_eval(case['expected'])
-    import copy
     original = copy.deepcopy(args)
     actual = entry_point(module, case['entryPoint'])(*args)
     assert exact(actual, expected), f'Returned {actual!r}'
@@ -182,7 +165,6 @@ def grade_python_case(code, case, scientific):
 
 
 def grade_sql_case(code, case):
-    import sqlite3
     with contextlib.closing(sqlite3.connect(':memory:')) as connection:
         connection.executescript(case['setup'])
         connection.execute('PRAGMA query_only=ON')
@@ -199,12 +181,12 @@ def grade_sql_case(code, case):
         assert len(rows) <= 1000, 'Query returned too many rows'
         expected = case['rows']
         assert len(rows) == len(expected), f'Returned {rows!r}'
-        import math
         def equal(a, b):
             if isinstance(a, (int, float)) and isinstance(b, (int, float)):
                 return math.isclose(a, b, rel_tol=1e-7, abs_tol=1e-8)
             return a == b
-        assert all(len(a) == len(b) and all(equal(x,y) for x,y in zip(a,b)) for a,b in zip(rows,expected)), f'Returned {rows!r}'
+        assert all(len(a) == len(b) and all(equal(x, y) for x, y in zip(a, b))
+                   for a, b in zip(rows, expected)), f'Returned {rows!r}'
         if case.get('columns'):
             assert [item[0] for item in cursor.description] == case['columns'], 'Check the output column aliases'
         return json.dumps(rows)[:4000]
@@ -215,11 +197,12 @@ def grade_submission(job):
     spec = _request_spec(job)
     code = job['code']
     scientific = spec.get('scientific') or job['problemId'].startswith(('numpy-', 'pandas-', 'ml-', 'dl-', 'llm-'))
-    cases = spec['cases'] if job.get('mode') == 'submit' else spec['cases'][:1]
+    cases = spec['cases'] if job['mode'] == 'submit' else spec['cases'][:1]
     output = BoundedOutput()
     results = []
     for case in cases:
-        result = {'name': case['name'], 'input': case.get('input', case.get('args', '')), 'expected': case['expected'], 'passed': False, 'actual': ''}
+        result = {'name': case['name'], 'input': case.get('input', case.get('args', '')),
+                  'expected': case['expected'], 'passed': False, 'actual': ''}
         try:
             with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
                 if spec['runtime'] == 'sql':

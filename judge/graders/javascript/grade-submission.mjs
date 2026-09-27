@@ -8,8 +8,7 @@ import { gradeFrontendCase, createFrontendFixture } from './frontend-grader.mjs'
 import { gradeBackendCase } from './backend-grader.mjs';
 
 const require = createRequire(import.meta.url);
-const MAX_CODE = 50 * 1024,
-  MAX_REQUEST = 1024 * 1024,
+const MAX_REQUEST = 1024 * 1024,
   MAX_OUTPUT = 16 * 1024;
 const bounded = (value, limit = 4000) => String(value).slice(0, limit);
 const errorText = (error) => bounded(error?.message ?? error);
@@ -107,39 +106,17 @@ export async function gradeSubmission(request) {
       );
   const results = [];
   try {
-    if (
-      !request ||
-      typeof request !== 'object' ||
-      Array.isArray(request) ||
-      request.protocolVersion !== 2
-    )
-      throw new Error('Runner protocol version 2 is required.');
-    if (
-      typeof request.problemId !== 'string' ||
-      !request.problemId ||
-      request.problemId.length > 200 ||
-      typeof request.problemVersion !== 'string' ||
-      !/^[a-f0-9]{64}$/.test(request.problemVersion)
-    )
-      throw new Error('A valid problem ID and version are required.');
+    if (request?.protocolVersion !== 2) throw new Error('Runner protocol version 2 is required.');
     const spec = request.spec;
     if (
-      !spec ||
-      typeof spec !== 'object' ||
-      Array.isArray(spec) ||
-      spec.runtime !== 'javascript' ||
+      spec?.runtime !== 'javascript' ||
       !['javascript', 'jsx', 'tsx', 'html', 'css'].includes(spec.syntax) ||
-      !Array.isArray(spec.cases) ||
-      spec.cases.length < 1 ||
-      spec.cases.length > 32 ||
+      ['check', 'fixtures', 'fixture'].some(
+        (key) => spec[key] !== undefined && typeof spec[key] !== 'string',
+      ) ||
       spec.cases.some(
         (test) =>
-          !test ||
-          typeof test !== 'object' ||
-          Array.isArray(test) ||
-          typeof test.name !== 'string' ||
           typeof test.input !== 'string' ||
-          typeof test.expected !== 'string' ||
           !Number.isInteger(test.variant) ||
           test.variant < 0 ||
           test.variant > 31,
@@ -151,14 +128,10 @@ export async function gradeSubmission(request) {
       (typeof spec.entryPoint !== 'string' || !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(spec.entryPoint))
     )
       throw new Error('A valid JavaScript entry point is required.');
-    if (typeof request.code !== 'string' || Buffer.byteLength(request.code, 'utf8') > MAX_CODE)
-      throw new Error('Code must be text of at most 50 KiB.');
-    const runtimeSpec = { ...spec, id: request.problemId };
     const backend = request.problemId.startsWith('backend-');
-    const mode = request.mode ?? 'submit';
-    if (!['submit', 'example', 'run'].includes(mode)) throw new Error('Unknown execution mode.');
-    const tests = mode === 'example' || mode === 'run' ? spec.cases.slice(0, 1) : spec.cases;
-    const compiled = await compile(request.code, runtimeSpec, backend);
+    const mode = request.mode;
+    const tests = mode === 'example' ? spec.cases.slice(0, 1) : spec.cases;
+    const compiled = await compile(request.code, spec, backend);
     if (!backend)
       browser = await chromium.launch({
         executablePath: '/usr/bin/chromium',
@@ -186,12 +159,12 @@ export async function gradeSubmission(request) {
           const path = `/work/candidate-${index}.mjs`;
           await writeFile(path, compiled, { flag: 'wx', mode: 0o600 });
           checked = await gradeBackendCase(
-            runtimeSpec,
+            spec,
             test,
             async () => (await import(pathToFileURL(path).href)).__candidate,
           );
         } else {
-          const fixture = createFrontendFixture(runtimeSpec.id, test.variant);
+          const fixture = createFrontendFixture(spec, test.variant);
           const context = await browser.newContext({
             viewport: { width: fixture.width, height: 800 },
             serviceWorkers: 'block',
@@ -213,8 +186,8 @@ export async function gradeSubmission(request) {
             if (spec.syntax === 'css') await page.addStyleTag({ content: request.code });
             await page.addScriptTag({ content: compiled });
             checked = await page.evaluate(gradeFrontendCase, {
-              id: runtimeSpec.id,
               ...test,
+              check: spec.check,
               unchanged: spec.unchanged,
               newArray: spec.newArray,
             });

@@ -9,10 +9,13 @@ AGENTS.md
 node_modules/
 dist
 build
+/judge/
+/proto/
 .next
 .venv
 __pycache__
 *.pyc
+*.tsbuildinfo
 *.log
 playwright-report
 test-results

@@ -1,4 +1,4 @@
-FROM node:22-bookworm-slim AS dependencies
+FROM node:22-bookworm-slim
 ENV DEBIAN_FRONTEND=noninteractive PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD=1
 # Node slim needs a trusted CA bundle before its first HTTPS package download.
 COPY --from=python:3.12-slim-bookworm /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/ca-certificates.crt
@@ -9,7 +9,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends chromium ca-cer
 WORKDIR /opt/runner
 COPY judge/graders/javascript/package.json ./package.json
 RUN npm install --omit=dev --ignore-scripts && npm cache clean --force
-FROM dependencies
 COPY judge/graders/javascript/ ./
 ENV HOME=/work TMPDIR=/work
 USER node

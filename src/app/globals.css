@@ -1,0 +1,5 @@
+/* Mantine styles everything else; the code editor fills the space its page gives it. */
+.editor-area > div,
+.editor-area .cm-editor {
+  height: 100%;
+}

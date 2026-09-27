@@ -1,24 +1,33 @@
 import type { Metadata, Viewport } from 'next';
 import type { ReactNode } from 'react';
-import PracticeProvider from '../components/PracticeProvider';
-import '../styles/globals.css';
-import '@fontsource/geist/latin-700.css';
-import '../styles/library.css';
-import '../styles/workspace.css';
+import { ColorSchemeScript, MantineProvider, mantineHtmlProps } from '@mantine/core';
+import AppProvider from '../components/AppProvider';
+import { ProblemListProvider } from '../hooks/useProblemList';
+import { theme } from '../lib/theme';
+import '@mantine/core/styles.css';
+import '@mantine/dates/styles.css';
+import './globals.css';
 
 export const metadata: Metadata = {
   title: 'Code Practice',
   description: 'A personal coding workbench for short, focused practice.',
-  icons: { icon: '/favicon.svg' },
+  icons: { icon: '/icon.png' },
 };
 
-export const viewport: Viewport = { themeColor: '#171c23' };
+export const viewport: Viewport = { themeColor: '#242424' };
 
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
-    <html lang="en">
+    <html lang="en" {...mantineHtmlProps}>
+      <head>
+        <ColorSchemeScript forceColorScheme="dark" />
+      </head>
       <body>
-        <PracticeProvider>{children}</PracticeProvider>
+        <MantineProvider theme={theme} forceColorScheme="dark">
+          <AppProvider>
+            <ProblemListProvider>{children}</ProblemListProvider>
+          </AppProvider>
+        </MantineProvider>
       </body>
     </html>
   );

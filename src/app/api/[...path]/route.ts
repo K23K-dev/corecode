@@ -1,32 +1,13 @@
 import { after } from 'next/server';
-import { createApiHandler } from '../../../server/index.ts';
+import { router } from '../../../server/router';
 
-export const runtime = 'nodejs';
-export const dynamic = 'force-dynamic';
-export const maxDuration = 300;
-
-const api = createApiHandler({
-  keepAlive: (task) =>
-    after(async () => {
-      await task;
-    }),
-});
-
-function handle(request: Request) {
-  const pending = api(request);
-  // Retain transaction completion and durable job acceptance after disconnect.
+/** Hands every /api request to the router, and lets its work finish if the browser disconnects. */
+async function handle(request: Request) {
+  const response = router.fetch(request);
   after(async () => {
-    await pending;
+    await response;
   });
-  return pending;
+  return response;
 }
 
-export {
-  handle as GET,
-  handle as POST,
-  handle as PUT,
-  handle as PATCH,
-  handle as DELETE,
-  handle as HEAD,
-  handle as OPTIONS,
-};
+export { handle as GET, handle as POST, handle as PUT };

@@ -9,23 +9,21 @@ import (
 	"sync"
 	"time"
 
+	"connectrpc.com/connect"
 	judgev1 "github.com/K23K-dev/corecode/judge/gen"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/status"
 )
 
-// Admission serializes queue acceptance, claims, and temporary Run reservations.
-// Execution and lease renewal happen outside that lock.
+// Admission serializes queue claims and temporary Run reservations. Execution
+// happens outside that lock.
 type jobQueue struct {
-	ctx        context.Context
-	store      *jobStore
-	executor   *executor
-	admission  sync.Mutex
-	mu         sync.Mutex
-	active     map[string]context.CancelFunc
-	wake       chan struct{}
-	workers    sync.WaitGroup
-	recovering bool
+	ctx       context.Context
+	store     *jobStore
+	executor  *executor
+	admission sync.Mutex
+	mu        sync.Mutex
+	active    map[string]context.CancelFunc
+	wake      chan struct{}
+	workers   sync.WaitGroup
 }
 
 func newJobQueue(ctx context.Context, store *jobStore, executor *executor) *jobQueue {
@@ -50,37 +48,27 @@ func (q *jobQueue) wait() {
 	q.executor.work.Wait()
 }
 
+// run grades the first case immediately. It never jumps ahead of queued submissions.
 func (q *jobQueue) run(ctx context.Context, request *judgev1.RunRequest) (*judgev1.RunResult, error) {
 	input, err := prepareExecution(ctx, q.store.pool, request, "example")
 	if err != nil {
 		return nil, err
 	}
 	q.admission.Lock()
-	q.mu.Lock()
-	recovering := q.recovering
-	q.mu.Unlock()
-	if recovering {
-		q.admission.Unlock()
-		return nil, status.Error(codes.Unavailable, "An interrupted execution is being cleaned up. Try again shortly.")
-	}
 	pending, err := q.store.hasPending(ctx, q.activeIDs())
-	var slot *executionSlot
+	if err == nil && pending {
+		err = rpcError(connect.CodeResourceExhausted, "Submissions are waiting. Try Run again shortly.")
+	}
 	if err == nil {
-		if pending {
-			err = status.Error(codes.ResourceExhausted, "Submissions are waiting. Try Run again shortly.")
-		} else {
-			input.imageID, err = q.executor.imageFor(input.runtime)
-			if err == nil {
-				slot, err = q.executor.reserve()
-			}
-		}
+		err = q.executor.acquire()
 	}
 	q.admission.Unlock()
 	if err != nil {
 		return nil, err
 	}
 	defer q.notify()
-	return slot.execute(ctx, input)
+	defer q.executor.release()
+	return q.executor.run(ctx, input)
 }
 
 func (q *jobQueue) serve() {
@@ -88,7 +76,7 @@ func (q *jobQueue) serve() {
 	defer ticker.Stop()
 	defer q.workers.Wait()
 	for {
-		for q.ctx.Err() == nil && q.executor.ready() {
+		for q.ctx.Err() == nil && q.executor.available() {
 			if !q.dispatch() {
 				break
 			}
@@ -102,17 +90,11 @@ func (q *jobQueue) serve() {
 	}
 }
 
+// dispatch claims one job into a free slot and grades it in the background.
 func (q *jobQueue) dispatch() bool {
 	q.admission.Lock()
 	defer q.admission.Unlock()
-	q.mu.Lock()
-	recovering := q.recovering
-	q.mu.Unlock()
-	if recovering {
-		return false
-	}
-	slot, err := q.executor.reserve()
-	if err != nil {
+	if q.executor.acquire() != nil {
 		return false
 	}
 	token := newJobID()
@@ -120,113 +102,60 @@ func (q *jobQueue) dispatch() bool {
 	job, err := q.store.claim(ctx, token, "cp-job-"+token, q.activeIDs())
 	cancel()
 	if err != nil || job == nil {
-		slot.release()
+		q.executor.release()
 		return false
 	}
 	ctx, cancel = context.WithCancel(q.ctx)
 	q.mu.Lock()
 	q.active[job.id] = cancel
-	q.recovering = job.recovery
 	q.mu.Unlock()
 	q.workers.Add(1)
 	go func() {
 		defer q.workers.Done()
-		defer cancel()
+		defer q.notify()
 		defer func() {
 			q.mu.Lock()
 			delete(q.active, job.id)
-			if job.recovery {
-				q.recovering = false
-			}
 			q.mu.Unlock()
-			q.notify()
 		}()
-		q.work(ctx, cancel, slot, job)
+		defer cancel()
+		defer q.executor.release()
+		q.work(ctx, job)
 	}()
 	return true
 }
 
-func (q *jobQueue) work(ctx context.Context, cancel context.CancelFunc, slot *executionSlot, job *claimedJob) {
-	renew := func() error {
-		probe, done := context.WithTimeout(context.Background(), 5*time.Second)
-		defer done()
-		canceled, err := q.store.renew(probe, job.id, job.ownerToken)
-		if err != nil || canceled {
-			cancel()
-		}
-		return err
-	}
-	// Check ownership before any Docker side effect, including after a restart.
-	if err := renew(); err != nil {
-		slot.release()
-		return // Expiration recovery will inspect the recorded attempt.
-	}
-	heartbeatStopped := make(chan struct{})
-	heartbeatDone := make(chan struct{})
-	go func() {
-		defer close(heartbeatDone)
-		ticker := time.NewTicker(10 * time.Second)
-		defer ticker.Stop()
-		for {
-			select {
-			case <-heartbeatStopped:
-				return
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				if renew() != nil {
-					return
-				}
-			}
-		}
-	}()
-
+// work grades one claimed job and saves the outcome. The claim's 60-second lease
+// outlasts any run (containers die at 25 s), so an expired lease means its judge
+// stopped and another claim may retry the job.
+func (q *jobQueue) work(ctx context.Context, job *claimedJob) {
 	var result *judgev1.RunResult
-	var executionErr error
-	if job.recovery {
-		if q.executor.recoverCleanup(job.containerName) {
-			slot.release()
-		} else {
-			slot.hold()
-		}
-	} else {
+	failure, retry := "", false
+	switch {
+	case job.cancelRequested:
+		// Stop arrived first; finishing without a result records the cancellation.
+	case job.exhausted:
+		failure = "Execution was interrupted twice. Submit again to retry."
+	default:
 		input, err := prepareStoredExecution(ctx, q.store.pool, job.problemID, job.problemVersion, job.specVersion, job.code, job.runtime)
-		if err != nil {
-			slot.release()
-			executionErr = err
-		} else {
-			input.imageID, input.name = job.imageID, job.containerName
-			result, executionErr = slot.execute(ctx, input)
+		if err == nil {
+			input.name = job.containerName
+			result, err = q.executor.run(ctx, input)
 		}
-	}
-	close(heartbeatStopped)
-	<-heartbeatDone
-	if !slot.cleaned {
-		// Keep the persisted attempt and its container name for explicit recovery.
-		log.Print("Job remains unfinished because Docker cleanup could not be confirmed.")
-		return
-	}
-
-	// Finishing is independent of the RPC and cancellation context. SQL fencing
-	// rejects stale owners and gives persisted cancellation precedence over results.
-	finishCtx, finishCancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer finishCancel()
-	var err error
-	if job.recovery {
-		_, err = q.store.finishRecovery(finishCtx, job.id, job.ownerToken)
-	} else {
-		failure, retry := "", false
-		if executionErr != nil {
-			retry = retryableExecution(executionErr)
+		if err != nil {
+			retry = retryableExecution(err)
 			failure = "The execution runtime was interrupted."
 			if !retry {
 				failure = "The grading specification or result was invalid."
 			}
 		}
-		_, err = q.store.finish(finishCtx, job.id, job.ownerToken, result, failure, retry)
 	}
-	if err != nil && !errors.Is(err, errJobOwnership) {
-		log.Print("Job completion could not be saved; its lease will make it eligible for recovery.")
+	// Finishing is independent of cancellation. SQL fencing rejects a stale owner
+	// and gives a persisted Stop precedence over the result.
+	finishCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if _, err := q.store.finish(finishCtx, job.id, job.ownerToken, result, failure, retry); err != nil && !errors.Is(err, errJobOwnership) {
+		log.Print("Job completion could not be saved; its lease will make it eligible for another attempt.")
 	}
 }
 
@@ -250,8 +179,8 @@ func (q *jobQueue) activeIDs() []string {
 }
 
 func retryableExecution(err error) bool {
-	switch status.Code(err) {
-	case codes.Unavailable, codes.Canceled, codes.DeadlineExceeded:
+	switch connect.CodeOf(err) {
+	case connect.CodeUnavailable, connect.CodeCanceled, connect.CodeDeadlineExceeded:
 		return true
 	default:
 		return false

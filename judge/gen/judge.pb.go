@@ -152,11 +152,8 @@ type SubmitRequest struct {
 	ProblemId      string `protobuf:"bytes,2,opt,name=problem_id,json=problemId,proto3" json:"problem_id,omitempty"`
 	ProblemVersion string `protobuf:"bytes,3,opt,name=problem_version,json=problemVersion,proto3" json:"problem_version,omitempty"`
 	Code           string `protobuf:"bytes,4,opt,name=code,proto3" json:"code,omitempty"`
-	// Pending solved-state intent and superseded IDs captured when submitting.
-	// Only an accepted result retires these IDs; later user intentions survive.
-	CompletionIntentIds []string `protobuf:"bytes,5,rep,name=completion_intent_ids,json=completionIntentIds,proto3" json:"completion_intent_ids,omitempty"`
-	unknownFields       protoimpl.UnknownFields
-	sizeCache           protoimpl.SizeCache
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
 }
 
 func (x *SubmitRequest) Reset() {
@@ -217,13 +214,6 @@ func (x *SubmitRequest) GetCode() string {
 	return ""
 }
 
-func (x *SubmitRequest) GetCompletionIntentIds() []string {
-	if x != nil {
-		return x.CompletionIntentIds
-	}
-	return nil
-}
-
 type JobRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	JobId         string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
@@ -271,8 +261,6 @@ func (x *JobRequest) GetJobId() string {
 type ListJobsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	ProblemId     string                 `protobuf:"bytes,1,opt,name=problem_id,json=problemId,proto3" json:"problem_id,omitempty"`
-	PageSize      uint32                 `protobuf:"varint,2,opt,name=page_size,json=pageSize,proto3" json:"page_size,omitempty"`
-	PageToken     string                 `protobuf:"bytes,3,opt,name=page_token,json=pageToken,proto3" json:"page_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -314,24 +302,9 @@ func (x *ListJobsRequest) GetProblemId() string {
 	return ""
 }
 
-func (x *ListJobsRequest) GetPageSize() uint32 {
-	if x != nil {
-		return x.PageSize
-	}
-	return 0
-}
-
-func (x *ListJobsRequest) GetPageToken() string {
-	if x != nil {
-		return x.PageToken
-	}
-	return ""
-}
-
 type ListJobsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Jobs          []*JobSnapshot         `protobuf:"bytes,1,rep,name=jobs,proto3" json:"jobs,omitempty"`
-	NextPageToken string                 `protobuf:"bytes,2,opt,name=next_page_token,json=nextPageToken,proto3" json:"next_page_token,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -373,13 +346,6 @@ func (x *ListJobsResponse) GetJobs() []*JobSnapshot {
 	return nil
 }
 
-func (x *ListJobsResponse) GetNextPageToken() string {
-	if x != nil {
-		return x.NextPageToken
-	}
-	return ""
-}
-
 type JobSnapshot struct {
 	state          protoimpl.MessageState `protogen:"open.v1"`
 	JobId          string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
@@ -392,7 +358,7 @@ type JobSnapshot struct {
 	FinishedAt *string    `protobuf:"bytes,7,opt,name=finished_at,json=finishedAt,proto3,oneof" json:"finished_at,omitempty"`
 	Result     *RunResult `protobuf:"bytes,8,opt,name=result,proto3" json:"result,omitempty"`
 	Error      *string    `protobuf:"bytes,9,opt,name=error,proto3,oneof" json:"error,omitempty"`
-	// Monotonically increases with each transition so watchers can ignore old snapshots.
+	// Monotonically increases with each transition so clients can ignore old snapshots.
 	Revision      uint64 `protobuf:"varint,10,opt,name=revision,proto3" json:"revision,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
@@ -661,26 +627,22 @@ const file_judge_proto_rawDesc = "" +
 	"\n" +
 	"problem_id\x18\x01 \x01(\tR\tproblemId\x12'\n" +
 	"\x0fproblem_version\x18\x02 \x01(\tR\x0eproblemVersion\x12\x12\n" +
-	"\x04code\x18\x03 \x01(\tR\x04code\"\xc4\x01\n" +
+	"\x04code\x18\x03 \x01(\tR\x04code\"\xad\x01\n" +
 	"\rSubmitRequest\x12#\n" +
 	"\rsubmission_id\x18\x01 \x01(\tR\fsubmissionId\x12\x1d\n" +
 	"\n" +
 	"problem_id\x18\x02 \x01(\tR\tproblemId\x12'\n" +
 	"\x0fproblem_version\x18\x03 \x01(\tR\x0eproblemVersion\x12\x12\n" +
-	"\x04code\x18\x04 \x01(\tR\x04code\x122\n" +
-	"\x15completion_intent_ids\x18\x05 \x03(\tR\x13completionIntentIds\"#\n" +
+	"\x04code\x18\x04 \x01(\tR\x04codeJ\x04\b\x05\x10\x06R\x15completion_intent_ids\"#\n" +
 	"\n" +
 	"JobRequest\x12\x15\n" +
-	"\x06job_id\x18\x01 \x01(\tR\x05jobId\"l\n" +
+	"\x06job_id\x18\x01 \x01(\tR\x05jobId\"S\n" +
 	"\x0fListJobsRequest\x12\x1d\n" +
 	"\n" +
-	"problem_id\x18\x01 \x01(\tR\tproblemId\x12\x1b\n" +
-	"\tpage_size\x18\x02 \x01(\rR\bpageSize\x12\x1d\n" +
-	"\n" +
-	"page_token\x18\x03 \x01(\tR\tpageToken\"n\n" +
+	"problem_id\x18\x01 \x01(\tR\tproblemIdJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04R\tpage_sizeR\n" +
+	"page_token\"]\n" +
 	"\x10ListJobsResponse\x122\n" +
-	"\x04jobs\x18\x01 \x03(\v2\x1e.corecode.judge.v1.JobSnapshotR\x04jobs\x12&\n" +
-	"\x0fnext_page_token\x18\x02 \x01(\tR\rnextPageToken\"\x9e\x03\n" +
+	"\x04jobs\x18\x01 \x03(\v2\x1e.corecode.judge.v1.JobSnapshotR\x04jobsJ\x04\b\x02\x10\x03R\x0fnext_page_token\"\x9e\x03\n" +
 	"\vJobSnapshot\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x1d\n" +
 	"\n" +
@@ -726,13 +688,12 @@ const file_judge_proto_rawDesc = "" +
 	"\x13JOB_STATE_CANCELING\x10\x03\x12\x17\n" +
 	"\x13JOB_STATE_COMPLETED\x10\x04\x12\x14\n" +
 	"\x10JOB_STATE_FAILED\x10\x05\x12\x16\n" +
-	"\x12JOB_STATE_CANCELED\x10\x062\xd5\x03\n" +
+	"\x12JOB_STATE_CANCELED\x10\x062\x88\x03\n" +
 	"\fJudgeService\x12B\n" +
 	"\x03Run\x12\x1d.corecode.judge.v1.RunRequest\x1a\x1c.corecode.judge.v1.RunResult\x12J\n" +
 	"\x06Submit\x12 .corecode.judge.v1.SubmitRequest\x1a\x1e.corecode.judge.v1.JobSnapshot\x12G\n" +
 	"\x06GetJob\x12\x1d.corecode.judge.v1.JobRequest\x1a\x1e.corecode.judge.v1.JobSnapshot\x12S\n" +
-	"\bListJobs\x12\".corecode.judge.v1.ListJobsRequest\x1a#.corecode.judge.v1.ListJobsResponse\x12K\n" +
-	"\bWatchJob\x12\x1d.corecode.judge.v1.JobRequest\x1a\x1e.corecode.judge.v1.JobSnapshot0\x01\x12J\n" +
+	"\bListJobs\x12\".corecode.judge.v1.ListJobsRequest\x1a#.corecode.judge.v1.ListJobsResponse\x12J\n" +
 	"\tCancelJob\x12\x1d.corecode.judge.v1.JobRequest\x1a\x1e.corecode.judge.v1.JobSnapshotB0Z.github.com/K23K-dev/corecode/judge/gen;judgev1b\x06proto3"
 
 var (
@@ -761,27 +722,25 @@ var file_judge_proto_goTypes = []any{
 	(*CaseResult)(nil),       // 8: corecode.judge.v1.CaseResult
 }
 var file_judge_proto_depIdxs = []int32{
-	6,  // 0: corecode.judge.v1.ListJobsResponse.jobs:type_name -> corecode.judge.v1.JobSnapshot
-	0,  // 1: corecode.judge.v1.JobSnapshot.state:type_name -> corecode.judge.v1.JobState
-	7,  // 2: corecode.judge.v1.JobSnapshot.result:type_name -> corecode.judge.v1.RunResult
-	8,  // 3: corecode.judge.v1.RunResult.cases:type_name -> corecode.judge.v1.CaseResult
-	1,  // 4: corecode.judge.v1.JudgeService.Run:input_type -> corecode.judge.v1.RunRequest
-	2,  // 5: corecode.judge.v1.JudgeService.Submit:input_type -> corecode.judge.v1.SubmitRequest
-	3,  // 6: corecode.judge.v1.JudgeService.GetJob:input_type -> corecode.judge.v1.JobRequest
-	4,  // 7: corecode.judge.v1.JudgeService.ListJobs:input_type -> corecode.judge.v1.ListJobsRequest
-	3,  // 8: corecode.judge.v1.JudgeService.WatchJob:input_type -> corecode.judge.v1.JobRequest
-	3,  // 9: corecode.judge.v1.JudgeService.CancelJob:input_type -> corecode.judge.v1.JobRequest
-	7,  // 10: corecode.judge.v1.JudgeService.Run:output_type -> corecode.judge.v1.RunResult
-	6,  // 11: corecode.judge.v1.JudgeService.Submit:output_type -> corecode.judge.v1.JobSnapshot
-	6,  // 12: corecode.judge.v1.JudgeService.GetJob:output_type -> corecode.judge.v1.JobSnapshot
-	5,  // 13: corecode.judge.v1.JudgeService.ListJobs:output_type -> corecode.judge.v1.ListJobsResponse
-	6,  // 14: corecode.judge.v1.JudgeService.WatchJob:output_type -> corecode.judge.v1.JobSnapshot
-	6,  // 15: corecode.judge.v1.JudgeService.CancelJob:output_type -> corecode.judge.v1.JobSnapshot
-	10, // [10:16] is the sub-list for method output_type
-	4,  // [4:10] is the sub-list for method input_type
-	4,  // [4:4] is the sub-list for extension type_name
-	4,  // [4:4] is the sub-list for extension extendee
-	0,  // [0:4] is the sub-list for field type_name
+	6, // 0: corecode.judge.v1.ListJobsResponse.jobs:type_name -> corecode.judge.v1.JobSnapshot
+	0, // 1: corecode.judge.v1.JobSnapshot.state:type_name -> corecode.judge.v1.JobState
+	7, // 2: corecode.judge.v1.JobSnapshot.result:type_name -> corecode.judge.v1.RunResult
+	8, // 3: corecode.judge.v1.RunResult.cases:type_name -> corecode.judge.v1.CaseResult
+	1, // 4: corecode.judge.v1.JudgeService.Run:input_type -> corecode.judge.v1.RunRequest
+	2, // 5: corecode.judge.v1.JudgeService.Submit:input_type -> corecode.judge.v1.SubmitRequest
+	3, // 6: corecode.judge.v1.JudgeService.GetJob:input_type -> corecode.judge.v1.JobRequest
+	4, // 7: corecode.judge.v1.JudgeService.ListJobs:input_type -> corecode.judge.v1.ListJobsRequest
+	3, // 8: corecode.judge.v1.JudgeService.CancelJob:input_type -> corecode.judge.v1.JobRequest
+	7, // 9: corecode.judge.v1.JudgeService.Run:output_type -> corecode.judge.v1.RunResult
+	6, // 10: corecode.judge.v1.JudgeService.Submit:output_type -> corecode.judge.v1.JobSnapshot
+	6, // 11: corecode.judge.v1.JudgeService.GetJob:output_type -> corecode.judge.v1.JobSnapshot
+	5, // 12: corecode.judge.v1.JudgeService.ListJobs:output_type -> corecode.judge.v1.ListJobsResponse
+	6, // 13: corecode.judge.v1.JudgeService.CancelJob:output_type -> corecode.judge.v1.JobSnapshot
+	9, // [9:14] is the sub-list for method output_type
+	4, // [4:9] is the sub-list for method input_type
+	4, // [4:4] is the sub-list for extension type_name
+	4, // [4:4] is the sub-list for extension extendee
+	0, // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_judge_proto_init() }

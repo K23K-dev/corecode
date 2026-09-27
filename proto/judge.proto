@@ -12,10 +12,9 @@ service JudgeService {
   // Acknowledges a durable submission. Disconnecting does not cancel the job.
   rpc Submit(SubmitRequest) returns (JobSnapshot);
   rpc GetJob(JobRequest) returns (JobSnapshot);
-  // Returns status metadata without grading results; use GetJob for the result.
+  // Recovery lookup: returns one unfinished job, or the latest finished job.
+  // Keep the original RPC name and repeated field for the deployed website.
   rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
-  // Sends the current snapshot, then changes. Disconnecting only stops watching.
-  rpc WatchJob(JobRequest) returns (stream JobSnapshot);
   // Queued work can cancel immediately; running work remains CANCELING until
   // cleanup is confirmed. Already terminal jobs return their existing outcome.
   rpc CancelJob(JobRequest) returns (JobSnapshot);
@@ -34,9 +33,9 @@ message SubmitRequest {
   string problem_id = 2;
   string problem_version = 3;
   string code = 4;
-  // Pending solved-state intent and superseded IDs captured when submitting.
-  // Only an accepted result retires these IDs; later user intentions survive.
-  repeated string completion_intent_ids = 5;
+  // Formerly completion intent IDs; never reuse this number.
+  reserved 5;
+  reserved "completion_intent_ids";
 }
 
 message JobRequest {
@@ -45,13 +44,14 @@ message JobRequest {
 
 message ListJobsRequest {
   string problem_id = 1;
-  uint32 page_size = 2;
-  string page_token = 3;
+  reserved 2, 3;
+  reserved "page_size", "page_token";
 }
 
 message ListJobsResponse {
   repeated JobSnapshot jobs = 1;
-  string next_page_token = 2;
+  reserved 2;
+  reserved "next_page_token";
 }
 
 enum JobState {
@@ -77,7 +77,7 @@ message JobSnapshot {
   optional string finished_at = 7;
   RunResult result = 8;
   optional string error = 9;
-  // Monotonically increases with each transition so watchers can ignore old snapshots.
+  // Monotonically increases with each transition so clients can ignore old snapshots.
   uint64 revision = 10;
 }
 
