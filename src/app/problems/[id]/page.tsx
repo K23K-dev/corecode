@@ -110,7 +110,6 @@ function ProblemView({
     setConsoleOpen,
     execute,
     cancel,
-    leave,
     clearResult,
   } = useRunner(store, problem, code, showCode);
 
@@ -118,21 +117,15 @@ function ProblemView({
     document.title = `${problem.title} · Code Practice`;
   }, [problem.title]);
 
-  function navigate(path: string) {
-    leave();
-    router.push(path);
-  }
-  const openLibrary = () => navigate('/');
-  const openProblem = (next: Problem) => navigate(`/problems/${encodeURIComponent(next.id)}`);
+  // Leaving unmounts this page, so useRunner stops watching; a submission keeps running.
+  const openProblem = (next: Problem) => router.push(`/problems/${encodeURIComponent(next.id)}`);
 
   const updateDraft = useCallback(
     (next: string) => store.setDraft(problem.id, next),
     [store, problem.id],
   );
   const showCodeLimit = useCallback(() => {
-    setNotice(
-      'That edit exceeds the code size limit (32,768 characters / 50 KiB). Your existing code has been kept.',
-    );
+    setNotice('That edit was not applied: code is limited to 32,768 characters (50 KiB).');
   }, [setNotice]);
 
   function resetDraft() {
@@ -145,14 +138,15 @@ function ProblemView({
 
   return (
     <Stack h="100dvh" gap={0}>
-      <TopBar onHome={openLibrary}>
+      <TopBar>
         <Group gap={4} wrap="nowrap">
           <Button
+            component={Link}
+            href="/"
             variant="subtle"
             color="gray"
             leftSection={<List size={17} />}
             aria-label="Back to practice"
-            onClick={openLibrary}
           >
             {problem.deck}
           </Button>
@@ -221,7 +215,7 @@ function ProblemView({
               Reset
             </Button>
           </Group>
-          <Box className="editor-area" flex={1} mih={80}>
+          <Box flex={1} mih={80}>
             <CodeEditor
               key={problem.id}
               code={code}

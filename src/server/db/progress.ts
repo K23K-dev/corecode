@@ -22,9 +22,8 @@ export async function readState(client: Pool | PoolClient): Promise<ProgressStat
 }
 
 /**
- * Apply autosaved changes under the profile row lock. The cp_state trigger rebuilds
- * judge history and records checkmark changes, so an accepted submission that was
- * already grading does not override a newer manual choice.
+ * Apply autosaved changes under the profile row lock, which the judge's finish also takes.
+ * The cp_state trigger then rebuilds each judged problem's recent attempts from history.
  */
 export async function writeState(pool: Pool, rawValue: unknown): Promise<ProgressState> {
   const changes = ProgressChangesSchema.parse(rawValue);
@@ -39,7 +38,8 @@ export async function writeState(pool: Pool, rawValue: unknown): Promise<Progres
     )
       throw new RequestError('Progress supports at most 1,000 saved problems and stars.');
     await client.query(
-      `UPDATE cp_state SET revision = revision + 1, progress = $1, stars = $2, updated_at = now()
+      `UPDATE cp_state
+      SET revision = revision + 1, progress = $1, stars = $2, updated_at = now()
       WHERE profile_id = 1`,
       [JSON.stringify(next.progress), JSON.stringify(next.stars)],
     );

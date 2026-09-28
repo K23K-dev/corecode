@@ -5,9 +5,8 @@ import { javascript } from '@codemirror/lang-javascript';
 import { sql, SQLite } from '@codemirror/lang-sql';
 import { html } from '@codemirror/lang-html';
 import { css } from '@codemirror/lang-css';
-import { shell } from '@codemirror/legacy-modes/mode/shell';
 import { EditorView, keymap } from '@codemirror/view';
-import { indentUnit, StreamLanguage } from '@codemirror/language';
+import { indentUnit } from '@codemirror/language';
 import { useMemo } from 'react';
 import { EditorState, Prec } from '@codemirror/state';
 import { MAX_CODE_BYTES, MAX_CODE_CHARACTERS } from '../schemas/progress';
@@ -39,7 +38,6 @@ const languages = {
   SQL: sql({ dialect: SQLite }),
   HTML: html(),
   CSS: css(),
-  Bash: StreamLanguage.define(shell),
 };
 const editingKeys = Prec.highest(
   keymap.of([
@@ -47,15 +45,13 @@ const editingKeys = Prec.highest(
       key: 'Escape',
       run: (view) => {
         const closed = closeCompletion(view);
-        // The completion keymap handles Escape before the editor's usual escape
-        // hatch. Keep Escape, then Tab available even when a popup was dismissed.
+        // This runs before CodeMirror's own Escape handling, so re-enable its Escape-then-Tab exit.
         view.setTabFocusMode(2_000);
         return closed;
       },
     },
     { key: 'Tab', run: acceptCompletion },
-    // The page runs (Ctrl+Enter) and submits (Ctrl+Shift+Enter); this stops the editor from
-    // also inserting a blank line. The key event still reaches the page.
+    // The page handles Ctrl+(Shift+)Enter: skip the editor's newline but let the event through.
     { key: 'Mod-Enter', run: () => true, shift: () => true },
     ...completionKeymap.filter((binding) => binding.key !== 'Escape'),
   ]),
@@ -93,8 +89,7 @@ export default function CodeEditor({
             ...textExtensions,
             ...(language in languages ? [languages[language as keyof typeof languages]] : []),
           ]),
-      // Keep completion state mounted while a run temporarily makes the editor
-      // read-only: pending completion timers still reference that state field.
+      // Keep completion mounted while a run makes the editor read-only; its timers still use it.
       autocompletion({
         activateOnTyping: !readOnly,
         defaultKeymap: false,
@@ -116,10 +111,12 @@ export default function CodeEditor({
     [language, onLimit, readOnly],
   );
   return (
+    // Fill the space the page gives the editor; `height` sizes the inner editor, `style` its wrapper.
     <CodeMirror
       value={code}
       onChange={onChange}
       height="100%"
+      style={{ height: '100%' }}
       theme={vscodeDark}
       extensions={extensions}
       editable={!readOnly}

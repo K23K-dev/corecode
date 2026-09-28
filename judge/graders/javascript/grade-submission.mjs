@@ -106,28 +106,9 @@ export async function gradeSubmission(request) {
       );
   const results = [];
   try {
+    // The spec is trusted: the judge loads it from the database.
     if (request?.protocolVersion !== 2) throw new Error('Runner protocol version 2 is required.');
     const spec = request.spec;
-    if (
-      spec?.runtime !== 'javascript' ||
-      !['javascript', 'jsx', 'tsx', 'html', 'css'].includes(spec.syntax) ||
-      ['check', 'fixtures', 'fixture'].some(
-        (key) => spec[key] !== undefined && typeof spec[key] !== 'string',
-      ) ||
-      spec.cases.some(
-        (test) =>
-          typeof test.input !== 'string' ||
-          !Number.isInteger(test.variant) ||
-          test.variant < 0 ||
-          test.variant > 31,
-      )
-    )
-      throw new Error('A valid trusted JavaScript grading specification is required.');
-    if (
-      !['html', 'css'].includes(spec.syntax) &&
-      (typeof spec.entryPoint !== 'string' || !/^[A-Za-z_$][A-Za-z0-9_$]*$/.test(spec.entryPoint))
-    )
-      throw new Error('A valid JavaScript entry point is required.');
     const backend = request.problemId.startsWith('backend-');
     const mode = request.mode;
     const tests = mode === 'example' ? spec.cases.slice(0, 1) : spec.cases;

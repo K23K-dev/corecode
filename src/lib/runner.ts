@@ -8,7 +8,7 @@ import {
   type PendingSubmission,
 } from '../schemas/submissions';
 import { ApiError, requestJson } from './api';
-export type { CaseResult, RunResult, JobSnapshot } from '../schemas/submissions';
+export type { RunResult, JobSnapshot } from '../schemas/submissions';
 
 export type ExecutionOutcome = {
   result?: RunResult;
@@ -16,12 +16,6 @@ export type ExecutionOutcome = {
   code?: string;
 };
 type OnJob = (job: JobSnapshot, code?: string) => void;
-type RecoveryStorage = Pick<Storage, 'length' | 'key' | 'getItem' | 'setItem' | 'removeItem'>;
-type Dependencies = {
-  fetch?: typeof fetch;
-  storage?: RecoveryStorage | null;
-  id?: () => string;
-};
 const terminal = (job: JobSnapshot) => ['completed', 'failed', 'canceled'].includes(job.state);
 
 function jobSnapshot(value: unknown): JobSnapshot {
@@ -45,83 +39,52 @@ function pause(ms: number, signal: AbortSignal) {
   });
 }
 
-// Pending submissions are saved before sending, so a reload or another page can
-// reconnect with the same UUID. Memory keeps them if browser storage fails.
+// Pending submissions are saved in the browser before sending, so a reload reconnects
+// with the same UUID and the server records the submission only once.
 const PENDING_PREFIX = 'coding-practice:submission:postgres:v1:';
-const pendingMemory = new Map<string, PendingSubmission>();
 
-function browserStorage(): RecoveryStorage | null {
+function pendingSubmissions(): PendingSubmission[] {
+  const found: PendingSubmission[] = [];
   try {
-    return globalThis.localStorage ?? null;
-  } catch {
-    return null;
-  }
-}
-
-function pendingSubmissions(storage: RecoveryStorage | null): PendingSubmission[] {
-  const entries = new Map(pendingMemory);
-  try {
-    for (let i = 0; storage && i < storage.length; i++) {
-      const key = storage.key(i);
+    for (let i = 0; i < localStorage.length; i++) {
+      const key = localStorage.key(i);
       if (!key?.startsWith(PENDING_PREFIX)) continue;
       try {
         const parsed = PendingSubmissionSchema.safeParse(
-          JSON.parse(storage.getItem(key) ?? 'null'),
+          JSON.parse(localStorage.getItem(key) ?? 'null'),
         );
-        if (!parsed.success) continue;
-        const item = parsed.data;
-        if (key === PENDING_PREFIX + item.submissionId)
-          entries.set(item.submissionId, {
-            ...item,
-            cancelRequested:
-              item.cancelRequested || entries.get(item.submissionId)?.cancelRequested || false,
-          });
+        if (parsed.success && key === PENDING_PREFIX + parsed.data.submissionId)
+          found.push(parsed.data);
       } catch {
-        // Leave unreadable records untouched and recover the remaining submissions.
+        // Skip an unreadable record and recover the others.
       }
     }
   } catch {
-    // Existing in-memory records remain recoverable if browser storage disappears.
+    // Browser storage is unavailable, so nothing was saved to recover.
   }
-  return [...entries.values()].sort((a, b) => a.createdAt - b.createdAt);
+  return found.sort((a, b) => a.createdAt - b.createdAt);
 }
 
-function savePending(
-  storage: RecoveryStorage | null,
-  pending: PendingSubmission,
-  required = false,
-) {
-  if (required && !storage)
-    throw new Error('Browser recovery storage is unavailable. Enable it before submitting.');
+function savePending(pending: PendingSubmission) {
   try {
-    storage?.setItem(PENDING_PREFIX + pending.submissionId, JSON.stringify(pending));
+    localStorage.setItem(PENDING_PREFIX + pending.submissionId, JSON.stringify(pending));
   } catch {
-    if (required)
-      throw new Error(
-        'Your submission could not be saved for recovery. Free browser storage and retry.',
-      );
+    throw new Error(
+      'Your submission could not be saved for recovery. Enable or free browser storage and retry.',
+    );
   }
-  pendingMemory.set(pending.submissionId, pending);
 }
 
-function forgetPending(storage: RecoveryStorage | null, id: string) {
-  pendingMemory.delete(id);
+function forgetPending(id: string) {
   try {
-    storage?.removeItem(PENDING_PREFIX + id);
+    localStorage.removeItem(PENDING_PREFIX + id);
   } catch {
-    // The server snapshot can clear it on recovery.
+    // The next recovery finds the finished job and removes the record then.
   }
-}
-
-export function pendingSubmissionProblemIds(): string[] {
-  return [...new Set(pendingSubmissions(browserStorage()).map((item) => item.problemId))];
 }
 
 /** Owns temporary requests and durable recovery; only an explicit Stop cancels a job. */
 export class Runner {
-  private readonly fetcher: typeof fetch;
-  private readonly storage: RecoveryStorage | null;
-  private readonly id: () => string;
   // The active run or observation: its abort controller, the submission being sent,
   // its latest snapshot, and where cancel() delivers the Stop response.
   private controller: AbortController | null = null;
@@ -129,15 +92,9 @@ export class Runner {
   private job: JobSnapshot | null = null;
   private receive: OnJob | null = null;
 
-  constructor(dependencies: Dependencies = {}) {
-    this.fetcher = dependencies.fetch ?? fetch;
-    this.storage = dependencies.storage === undefined ? browserStorage() : dependencies.storage;
-    this.id = dependencies.id ?? (() => crypto.randomUUID());
-  }
-
-  /** Execution requests may wait for the hosted judge to wake, so they allow two minutes. */
-  private call(path: string, signal: AbortSignal, body?: unknown, timeoutMs = 120_000) {
-    return requestJson(path, { fetch: this.fetcher, signal, body, timeoutMs });
+  /** Judge calls outlast autosave's timeout: a submission can wait in the queue first. */
+  private call(path: string, signal: AbortSignal, body?: unknown, timeoutMs = 30_000) {
+    return requestJson(path, { signal, body, timeoutMs });
   }
 
   private begin() {
@@ -165,18 +122,15 @@ export class Runner {
     try {
       controller.signal.throwIfAborted();
       if (mode === 'submit') {
-        const existing = pendingSubmissions(this.storage).find(
-          (item) => item.problemId === problem.id && !item.cancelRequested,
-        );
+        const existing = pendingSubmissions().find((item) => item.problemId === problem.id);
         const pending = existing ?? {
-          submissionId: this.id(),
+          submissionId: crypto.randomUUID(),
           problemId: problem.id,
           problemVersion: problem.version,
           code,
-          cancelRequested: false,
           createdAt: Date.now(),
         };
-        if (!existing) savePending(this.storage, pending, true);
+        if (!existing) savePending(pending);
         return await this.submit(pending, controller.signal, onJob);
       }
       const { value, status } = await this.call(
@@ -188,7 +142,7 @@ export class Runner {
           code,
           mode,
         },
-        140_000,
+        60_000,
       );
       if (status !== 200) throw new Error('Invalid runner response.');
       return { result: RunResultSchema.parse(value), code };
@@ -204,56 +158,28 @@ export class Runner {
   ): Promise<ExecutionOutcome> {
     this.pending = pending;
     let job: JobSnapshot;
-    let accepting = false;
     try {
-      if (pending.cancelRequested) {
-        const { value } = await this.call(
-          `/api/jobs/${encodeURIComponent(pending.submissionId)}/cancel`,
-          signal,
-          {},
+      const { value, status } = await this.call('/api/run', signal, {
+        problemId: pending.problemId,
+        problemVersion: pending.problemVersion,
+        code: pending.code,
+        mode: 'submit',
+        submissionId: pending.submissionId,
+      });
+      if (status !== 202)
+        throw new Error(
+          'Submission acceptance was not confirmed. Reopen this problem to retry safely.',
         );
-        job = jobSnapshot(value);
-      } else {
-        accepting = true;
-        const { value, status } = await this.call('/api/run', signal, {
-          problemId: pending.problemId,
-          problemVersion: pending.problemVersion,
-          code: pending.code,
-          mode: 'submit',
-          submissionId: pending.submissionId,
-        });
-        accepting = false;
-        if (status !== 202)
-          throw new Error(
-            'Submission acceptance was not confirmed. Reopen this problem to retry safely.',
-          );
-        job = jobSnapshot(value);
-        if (pending.cancelRequested) {
-          job = jobSnapshot(
-            (await this.call(`/api/jobs/${encodeURIComponent(job.jobId)}/cancel`, signal, {}))
-              .value,
-          );
-        }
-      }
+      job = jobSnapshot(value);
     } catch (error) {
       // These rejections are final: the problem changed or the input can never be accepted.
-      if (
-        accepting &&
-        error instanceof ApiError &&
-        [400, 404, 409, 413, 422].includes(error.status)
-      ) {
-        forgetPending(this.storage, pending.submissionId);
+      if (error instanceof ApiError && [400, 404, 409, 413, 422].includes(error.status)) {
+        forgetPending(pending.submissionId);
         throw error;
       }
       if (signal.aborted) throw error;
-      if (pending.cancelRequested && error instanceof ApiError && error.status === 404)
-        throw new ApiError(
-          'Cancellation is still unconfirmed because this submission has not appeared on the server. Reopen this problem to check again.',
-          404,
-          'cancel_pending',
-        );
       throw new Error(
-        `${error instanceof Error ? error.message : 'The submission connection failed.'} Reopen this problem to reconnect using the same submission ID.`,
+        `${error instanceof Error ? error.message : 'The submission connection failed.'} Reopen this problem to reconnect.`,
       );
     }
     if (job.jobId !== pending.submissionId || job.problemId !== pending.problemId)
@@ -261,22 +187,14 @@ export class Runner {
     return this.observe(job, signal, onJob, pending.code);
   }
 
+  /** Reconnects to this problem's submissions saved in the browser, resending the same UUIDs. */
   async recover(problem: Problem, onJob?: OnJob): Promise<ExecutionOutcome | null> {
     const controller = this.begin();
     try {
-      controller.signal.throwIfAborted();
       let outcome: ExecutionOutcome | null = null;
-      let unresolvedCancellation: Error | null = null;
-      const pending = pendingSubmissions(this.storage).filter(
-        (item) => item.problemId === problem.id,
-      );
-      for (const item of pending) {
+      for (const item of pendingSubmissions().filter((item) => item.problemId === problem.id)) {
         try {
           outcome = await this.submit(item, controller.signal, onJob);
-        } catch (error) {
-          if (error instanceof ApiError && error.code === 'cancel_pending')
-            unresolvedCancellation = error;
-          else throw error;
         } finally {
           if (this.controller === controller) {
             this.pending = null;
@@ -285,26 +203,13 @@ export class Runner {
           }
         }
       }
-      if (outcome) return outcome;
-      const { value } = await this.call(
-        `/api/jobs?problemId=${encodeURIComponent(problem.id)}`,
-        controller.signal,
-      );
-      const recovered = (value as { job?: unknown }).job;
-      if (recovered === null) {
-        if (unresolvedCancellation) throw unresolvedCancellation;
-        return null;
-      }
-      const job = jobSnapshot(recovered);
-      if (job.problemId !== problem.id)
-        throw new Error('The recovered submission belongs to another problem.');
-      return await this.observe(job, controller.signal, onJob);
+      return outcome;
     } finally {
       this.done(controller);
     }
   }
 
-  /** Poll once a second until the job finishes; a Stop response prompts an immediate poll. */
+  /** Poll once a second until the job finishes, backing off while its status is unavailable. */
   private async observe(
     initial: JobSnapshot,
     signal: AbortSignal,
@@ -314,7 +219,7 @@ export class Runner {
     const stopped = () => new DOMException('Observation stopped.', 'AbortError');
     let current = initial;
     let finished = false;
-    let interrupt = new AbortController();
+    // Polls and the Stop response can arrive out of order, so keep the newest revision.
     const accept = (next: JobSnapshot) => {
       if (finished || signal.aborted) return;
       if (next.jobId !== initial.jobId || next.problemId !== initial.problemId)
@@ -324,45 +229,35 @@ export class Runner {
       this.job = next;
       onJob?.(next, code);
     };
-    // cancel() delivers its response here, interrupting an older GET or retry delay.
-    const receive = (next: JobSnapshot) => {
-      accept(next);
-      interrupt.abort();
-    };
-    this.receive = receive;
+    this.receive = accept;
     try {
       if (signal.aborted) throw stopped();
       accept(initial);
       let failures = 0;
-      let delay = 1000;
       while (!terminal(current)) {
-        await pause(delay, AbortSignal.any([signal, interrupt.signal]));
+        await pause(failures ? Math.min(1000 * 2 ** (failures - 1), 8000) : 1000, signal);
         if (signal.aborted) throw stopped();
         if (terminal(current)) break;
-        if (interrupt.signal.aborted) interrupt = new AbortController();
         try {
           const { value } = await this.call(
             `/api/jobs/${encodeURIComponent(initial.jobId)}`,
-            AbortSignal.any([signal, interrupt.signal]),
+            signal,
           );
           accept(jobSnapshot(value));
           failures = 0;
-          delay = 1000;
         } catch {
           if (signal.aborted) throw stopped();
-          if (interrupt.signal.aborted) delay = 0;
-          else if (++failures > 5)
+          if (++failures > 5)
             throw new Error(
               'Submission status is unavailable. Reopen this problem to reconnect; your submission stays saved.',
             );
-          else delay = Math.min(1000 * 2 ** (failures - 1), 8000);
         }
       }
     } finally {
       finished = true;
-      if (this.receive === receive) this.receive = null;
+      if (this.receive === accept) this.receive = null;
     }
-    forgetPending(this.storage, current.jobId);
+    forgetPending(current.jobId);
     return { job: current, result: current.result, code };
   }
 
@@ -374,35 +269,22 @@ export class Runner {
     this.receive = null;
   }
 
+  /** Stop: abandon a Run or a submission the judge hasn't confirmed; cancel a confirmed one. */
   async cancel(): Promise<JobSnapshot | void> {
-    const pending = this.pending;
-    if (pending) {
-      pending.cancelRequested = true;
-      savePending(this.storage, pending);
-    }
-    const id = this.job?.jobId ?? pending?.submissionId;
+    const id = this.job?.jobId;
     if (!id) {
+      if (this.pending) forgetPending(this.pending.submissionId);
       this.controller?.abort();
       return;
     }
-    try {
-      const { value } = await this.call(
-        `/api/jobs/${encodeURIComponent(id)}/cancel`,
-        new AbortController().signal,
-        {},
-      );
-      const job = jobSnapshot(value);
-      if (terminal(job)) forgetPending(this.storage, job.jobId);
-      this.receive?.(job);
-      return job;
-    } catch (error) {
-      // Acceptance can still be committing. submit() checks the saved flag again
-      // after its response; recovery only cancels this UUID, never re-enqueues it.
-      if (pending && !this.job && error instanceof ApiError && error.status === 404)
-        throw new Error(
-          'Cancellation is pending while submission acceptance is confirmed. Reopen this problem to reconnect.',
-        );
-      throw error;
-    }
+    const { value } = await this.call(
+      `/api/jobs/${encodeURIComponent(id)}/cancel`,
+      new AbortController().signal,
+      {},
+    );
+    const job = jobSnapshot(value);
+    if (terminal(job)) forgetPending(job.jobId);
+    this.receive?.(job);
+    return job;
   }
 }

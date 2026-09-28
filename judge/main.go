@@ -11,14 +11,13 @@ import (
 	"syscall"
 	"time"
 
-	"connectrpc.com/grpchealth"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/moby/moby/client"
 )
 
-// The Sandbox's HTTPS endpoint forwards to this port. Binding it also stops a
-// second judge process on the same machine before it can touch Docker.
-const judgeAddress = "0.0.0.0:8080"
+// Caddy forwards here. Binding this port also stops a second judge on the machine before
+// it can touch Docker.
+const judgeAddress = "127.0.0.1:8080"
 
 func main() {
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
@@ -48,7 +47,7 @@ func serve(ctx context.Context) (result error) {
 	if err != nil {
 		return errors.New("Cannot configure the judge's Neon connection.")
 	}
-	docker, err := client.New(client.FromEnv, client.WithHost(cfg.dockerHost))
+	docker, err := client.New(client.FromEnv)
 	if err != nil {
 		pool.Close() // No connections have been acquired yet.
 		return errors.New("Cannot configure Docker; check DOCKER_HOST and Docker TLS settings.")
@@ -59,43 +58,30 @@ func serve(ctx context.Context) (result error) {
 	executor := newExecutor(workCtx, docker, cfg)
 	queue := newJobQueue(workCtx, &jobStore{pool: pool}, executor)
 
-	// Health reports SERVING once Docker is ready and leftover containers are gone.
-	health := grpchealth.NewStaticChecker()
-	health.SetStatus("", grpchealth.StatusNotServing)
-	var lifecycle *judgeLifecycle
-	var lifecycleDone <-chan struct{}
-	if !cfg.sandboxDeadline.IsZero() {
-		lifecycle = newJudgeLifecycle(queue, 30*time.Second, time.Until(cfg.sandboxDeadline))
-		lifecycleDone = lifecycle.done
-		go lifecycle.run(workCtx)
-	}
-	// gRPC clients use HTTP/2 without TLS; the Sandbox proxy sends gRPC-Web over HTTP/1.1.
+	// Caddy forwards gRPC as HTTP/2 without TLS (h2c); HTTP/1.1 still serves gRPC-Web and Connect.
 	protocols := new(http.Protocols)
 	protocols.SetHTTP1(true)
 	protocols.SetUnencryptedHTTP2(true)
 	server := &http.Server{
-		Handler:           newHandler(token, &judgeServer{queue: queue}, health, lifecycle),
+		Handler:           newHandler(token, &judgeServer{queue: queue}),
 		Protocols:         protocols,
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       75 * time.Second,
 	}
 	queueDone := make(chan struct{})
+	// Until Docker is ready and leftover containers are gone, calls get Unavailable.
 	go func() {
 		defer close(queueDone)
 		if executor.prepare(workCtx) {
-			if executor.available() { // not already shutting down
-				health.SetStatus("", grpchealth.StatusServing)
-			}
 			queue.serve()
 		}
 	}()
 
-	// Shutdown stops admission, gives running work five seconds, then cancels it.
+	// Shutdown stops new work, gives running work five seconds, then cancels it.
 	// Interrupted jobs return to the queue for one more attempt.
 	defer func() {
 		shutdownCtx, stopShutdown := context.WithTimeout(context.Background(), 30*time.Second)
 		defer stopShutdown()
-		health.SetStatus("", grpchealth.StatusNotServing)
 		drained := make(chan struct{})
 		go func() {
 			queue.beginDrain()
@@ -111,7 +97,7 @@ func serve(ctx context.Context) (result error) {
 		go func() {
 			<-drained
 			<-queueDone
-			// Flush final RPC replies, then close health watches that can remain open forever.
+			// Give final RPC replies a second to flush, then close the server.
 			stopCtx, cancelStop := context.WithTimeout(context.Background(), time.Second)
 			if server.Shutdown(stopCtx) != nil {
 				server.Close()
@@ -124,7 +110,7 @@ func serve(ctx context.Context) (result error) {
 		case <-closed:
 		case <-shutdownCtx.Done():
 			go server.Close()
-			result = errors.New("Judge shutdown could not finish within 30 seconds; unfinished jobs retry after their leases expire.")
+			result = errors.New("Shutdown took over 30 seconds; unfinished jobs retry when their leases expire.")
 		}
 	}()
 
@@ -137,7 +123,6 @@ func serve(ctx context.Context) (result error) {
 			return errors.New("The judge listener stopped unexpectedly.")
 		}
 	case <-ctx.Done():
-	case <-lifecycleDone:
 	}
 	return nil
 }

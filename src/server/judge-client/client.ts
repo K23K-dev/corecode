@@ -1,49 +1,41 @@
 import 'server-only';
-import { Agent } from 'node:https';
-import { Code, createClient, type CallOptions, type Interceptor } from '@connectrpc/connect';
-import { createGrpcWebTransport } from '@connectrpc/connect-node';
+import {
+  Code,
+  createClient,
+  type CallOptions,
+  type Client,
+  type Interceptor,
+} from '@connectrpc/connect';
+import { createGrpcTransport } from '@connectrpc/connect-node';
 import { RequestError } from '../middleware';
 import { JudgeService, type JobSnapshot, type RunResult } from './gen/judge_pb';
-import { Health, HealthCheckResponse_ServingStatus } from './gen/grpc/health/v1/health_pb';
 
-export type JudgeClient = ReturnType<typeof createJudgeClient>;
-export type JudgeClientResolver = (options?: {
-  signal?: AbortSignal;
-}) => JudgeClient | Promise<JudgeClient>;
-export type Judge = ReturnType<typeof createJudge>;
+type JudgeClient = Client<typeof JudgeService>;
 type SignalOptions = { signal?: AbortSignal };
 
-/** gRPC-Web over HTTPS: the Sandbox's endpoint proxies HTTP/1.1 to the judge. */
-export function createJudgeClient(address: string, token: string) {
+/** gRPC over HTTP/2 to the judge's VM, where Caddy terminates HTTPS. */
+function createJudgeClient(address: string, token: string): JudgeClient {
   const url = new URL(address);
-  if (url.protocol !== 'https:') throw new Error('The judge token may only be sent over HTTPS.');
+  // The token travels only over HTTPS, or plain HTTP on this machine (an SSH tunnel).
+  const loopback = ['127.0.0.1', 'localhost', '[::1]'].includes(url.hostname);
+  if (url.protocol !== 'https:' && !(url.protocol === 'http:' && loopback)) {
+    throw new Error('JUDGE_URL must use https:// (http:// only for this machine).');
+  }
   const authorize: Interceptor = (next) => (request) => {
     request.header.set('authorization', `Bearer ${token}`);
     return next(request);
   };
-  const options = {
+  const transport = createGrpcTransport({
     baseUrl: url.origin,
     readMaxBytes: 1024 * 1024,
     writeMaxBytes: 1024 * 1024,
     interceptors: [authorize],
-  };
-  const agent = new Agent({ keepAlive: true });
-  const transport = createGrpcWebTransport({
-    ...options,
-    httpVersion: '1.1',
-    nodeOptions: { agent },
+    // A Vercel Function can freeze between requests, so a connection idle for 10 s gets a
+    // PING before reuse.
+    pingIntervalMs: 10_000,
+    pingTimeoutMs: 3000,
   });
-  const health = createClient(Health, transport);
-  return {
-    service: createClient(JudgeService, transport),
-    async checkHealth() {
-      const response = await health.check({ service: '' }, { timeoutMs: 2000 });
-      return HealthCheckResponse_ServingStatus[response.status];
-    },
-    close() {
-      agent.destroy();
-    },
-  };
+  return createClient(JudgeService, transport);
 }
 
 const JOB_STATES = [
@@ -63,7 +55,7 @@ const JUDGE_ERRORS: Partial<Record<Code, [number, string, string]>> = {
   [Code.AlreadyExists]: [
     409,
     'submission_conflict',
-    'That submission ID belongs to different input. Check its saved result before retrying.',
+    'That submission ID was already used for different input.',
   ],
   [Code.FailedPrecondition]: [
     409,
@@ -73,14 +65,10 @@ const JUDGE_ERRORS: Partial<Record<Code, [number, string, string]>> = {
   [Code.ResourceExhausted]: [
     429,
     'runner_busy',
-    'Execution slots are busy or submissions are waiting. Try again shortly.',
+    'Both execution slots are busy. Try again shortly.',
   ],
   [Code.Canceled]: [499, 'canceled', 'The execution request was canceled.'],
-  [Code.DeadlineExceeded]: [
-    504,
-    'judge_timeout',
-    'The judge did not respond in time. Check the submission status before retrying.',
-  ],
+  [Code.DeadlineExceeded]: [504, 'judge_timeout', 'The judge did not respond in time.'],
 };
 
 function judgeError(error?: unknown) {
@@ -122,65 +110,41 @@ function snapshot(value: JobSnapshot) {
   return {
     jobId: value.jobId,
     problemId: value.problemId,
-    problemVersion: value.problemVersion,
     state,
-    createdAt: value.createdAt,
-    startedAt: value.startedAt || undefined,
-    finishedAt: value.finishedAt || undefined,
     result: value.result ? result(value.result) : undefined,
     error: value.error,
     revision: String(value.revision),
   };
 }
 
-/** The judge operations the API uses; `resolve` supplies a ready client for each call. */
-export function createJudge(resolve: JudgeClientResolver) {
+/** The judge operations the API uses, with a timeout on each call. */
+export function createJudge(address: string, token: string) {
+  const client = createJudgeClient(address, token);
   async function call<T>(
-    invoke: (client: JudgeClient, options: CallOptions) => Promise<T>,
+    invoke: (options: CallOptions) => Promise<T>,
     timeoutMs: number,
     signal?: AbortSignal,
   ): Promise<T> {
     try {
       signal?.throwIfAborted();
-      const client = await resolve({ signal });
-      signal?.throwIfAborted();
-      return await invoke(client, { timeoutMs, signal });
+      return await invoke({ timeoutMs, signal });
     } catch (error) {
       throw judgeError(error);
     }
   }
   return {
-    async run(
-      request: Parameters<JudgeClient['service']['run']>[0],
-      { signal }: SignalOptions = {},
-    ) {
-      return result(
-        await call((client, options) => client.service.run(request, options), 40_000, signal),
-      );
+    async run(request: Parameters<JudgeClient['run']>[0], { signal }: SignalOptions = {}) {
+      return result(await call((options) => client.run(request, options), 40_000, signal));
     },
-    async submit(request: Parameters<JudgeClient['service']['submit']>[0]) {
+    async submit(request: Parameters<JudgeClient['submit']>[0]) {
       // Acceptance survives browser disconnects; retries reuse the same UUID.
-      return snapshot(
-        await call((client, options) => client.service.submit(request, options), 10_000),
-      );
+      return snapshot(await call((options) => client.submit(request, options), 10_000));
     },
     async getJob(jobId: string, { signal }: SignalOptions = {}) {
-      return snapshot(
-        await call((client, options) => client.service.getJob({ jobId }, options), 5000, signal),
-      );
-    },
-    async recoverJob(problemId: string, { signal }: SignalOptions = {}) {
-      const response = await call(
-        (client, options) => client.service.listJobs({ problemId }, options),
-        5000,
-        signal,
-      );
-      return response.jobs[0] ? snapshot(response.jobs[0]) : null;
+      return snapshot(await call((options) => client.getJob({ jobId }, options), 5000, signal));
     },
     async cancelJob(jobId: string) {
-      return snapshot(
-        await call((client, options) => client.service.cancelJob({ jobId }, options), 10_000),
-      );
+      return snapshot(await call((options) => client.cancelJob({ jobId }, options), 10_000));
     },
   };
 }

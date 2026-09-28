@@ -21,18 +21,16 @@ export async function requestJson(
     signal,
     timeoutMs = 8000,
     failure,
-    fetch: fetcher = fetch,
   }: {
     method?: 'GET' | 'POST' | 'PUT';
     body?: unknown;
     signal?: AbortSignal;
     timeoutMs?: number;
     failure?: string;
-    fetch?: typeof fetch;
   } = {},
 ): Promise<{ status: number; value: unknown }> {
   const timeout = AbortSignal.timeout(timeoutMs);
-  const response = await fetcher(path, {
+  const response = await fetch(path, {
     method: method ?? (body === undefined ? 'GET' : 'POST'),
     cache: 'no-store',
     signal: signal ? AbortSignal.any([signal, timeout]) : timeout,

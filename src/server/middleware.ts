@@ -1,3 +1,5 @@
+import type { Context } from 'hono';
+import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import { ZodError } from 'zod';
 import { MAX_PROGRESS_BYTES as MAX_BODY_BYTES } from '../schemas/progress';
 
@@ -11,47 +13,15 @@ export class RequestError extends Error {
   }
 }
 
-const LOOPBACK_HOSTS = new Set(['127.0.0.1', 'localhost', '[::1]']);
-
-function checkedOrigin(value: string): URL {
-  const url = new URL(value);
-  if (url.protocol !== 'http:' || !LOOPBACK_HOSTS.has(url.hostname) || url.origin !== value) {
-    throw new Error('The browser origin must be an exact loopback HTTP origin.');
-  }
-  return url;
-}
-
-export function checkedHostedOrigin(value: string | undefined): URL {
-  let url;
-  try {
-    url = new URL(value ?? '');
-  } catch {
-    throw new Error('The production browser origin must be an exact public HTTPS origin.');
-  }
-  if (
-    url.protocol !== 'https:' ||
-    url.origin !== value ||
-    url.port ||
-    !/^(?:[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.)+[a-z]{2,}$/.test(url.hostname) ||
-    /(?:^|\.)(?:localhost|local)$/.test(url.hostname)
-  ) {
-    throw new Error('The production browser origin must be an exact public HTTPS origin.');
-  }
-  return url;
-}
-
-/** Host/CSRF checks, not authentication. Hosted access is gated by Vercel upstream. */
-export function protectRequest(appOrigin: string, hosted = false): (request: Request) => void {
-  const browser = hosted ? checkedHostedOrigin(appOrigin) : checkedOrigin(appOrigin);
-  const authorities = hosted
-    ? new Set([browser.host])
-    : new Set(
-        [...LOOPBACK_HOSTS].map((host) => `${host}${browser.port ? `:${browser.port}` : ''}`),
-      );
+/** Host and CSRF checks, not authentication: Vercel Authentication gates the hosted site. */
+export function protectRequest(appOrigin: string, hosted: boolean): (request: Request) => void {
+  const { host, port } = new URL(appOrigin);
+  const hosts = hosted
+    ? [host]
+    : ['127.0.0.1', 'localhost', '[::1]'].map((name) => `${name}:${port}`);
   return (request) => {
-    // Never trust forwarding headers. Next's local CLI must also bind to loopback:
-    // Web Requests intentionally do not expose the underlying TCP peer address.
-    if (!authorities.has(request.headers.get('host') ?? '')) {
+    // Only the app's own host name, which also stops DNS rebinding. Forwarding headers are ignored.
+    if (!hosts.includes(request.headers.get('host') ?? '')) {
       throw new RequestError(
         hosted
           ? 'Use the configured production application.'
@@ -60,48 +30,34 @@ export function protectRequest(appOrigin: string, hosted = false): (request: Req
         'forbidden',
       );
     }
+    // Refuse other sites' requests, even reads: GET /api/jobs/:id would still reach the judge.
     const origin = request.headers.get('origin');
-    const site = request.headers.get('sec-fetch-site');
     if (
       (origin !== null && origin !== appOrigin) ||
-      site === 'cross-site' ||
-      (hosted && site === 'same-site')
+      request.headers.get('sec-fetch-site') === 'cross-site'
     ) {
       throw new RequestError('This browser origin is not allowed.', 403, 'forbidden');
     }
-    if (request.method === 'PUT' || request.method === 'POST') {
-      if (origin !== appOrigin || request.headers.get('x-code-practice-client') !== '1') {
-        throw new RequestError('Use the application to save progress.', 403, 'forbidden');
-      }
-      if (
-        !/^application\/json(?:\s*;\s*charset=utf-8)?$/i.test(
-          request.headers.get('content-type') ?? '',
-        )
-      ) {
-        throw new RequestError(
-          'Save requests must use application/json.',
-          415,
-          'unsupported_media_type',
-        );
-      }
+    // A custom header makes any other origin send a CORS preflight, which this API never approves.
+    if (
+      request.method !== 'GET' &&
+      request.method !== 'HEAD' &&
+      request.headers.get('x-code-practice-client') !== '1'
+    ) {
+      throw new RequestError('Use the application to save progress.', 403, 'forbidden');
     }
   };
 }
 
-/** Parse a JSON request body of at most 10 MiB. */
-export async function jsonBody(request: Request): Promise<unknown> {
+/** A write's JSON body of at most 10 MiB, checked before reading and again after. */
+export async function jsonBody(c: Context): Promise<unknown> {
   const tooLarge = new RequestError(
     'Save request exceeds the 10 MiB limit.',
     413,
     'payload_too_large',
   );
-  if (Number(request.headers.get('content-length')) > MAX_BODY_BYTES) throw tooLarge;
-  let bytes: ArrayBuffer;
-  try {
-    bytes = await request.arrayBuffer();
-  } catch {
-    throw new RequestError('Save request was interrupted.');
-  }
+  if (Number(c.req.header('content-length')) > MAX_BODY_BYTES) throw tooLarge;
+  const bytes = await c.req.arrayBuffer();
   if (bytes.byteLength > MAX_BODY_BYTES) throw tooLarge;
   try {
     return JSON.parse(new TextDecoder().decode(bytes));
@@ -110,34 +66,20 @@ export async function jsonBody(request: Request): Promise<unknown> {
   }
 }
 
-export function jsonResponse(value: unknown, status = 200, head = false): Response {
-  return new Response(head ? null : JSON.stringify(value), {
-    status,
-    headers: {
-      'Content-Type': 'application/json; charset=utf-8',
-      'Cache-Control': 'no-store',
-      'X-Content-Type-Options': 'nosniff',
-    },
-  });
-}
-
-export function errorResponse(error: unknown, head = false): Response {
+/** Every API error has the same shape: { error, code }. */
+export function errorResponse(c: Context, error: unknown): Response {
   if (error instanceof ZodError)
-    return jsonResponse(
+    return c.json(
       { error: error.issues[0]?.message ?? 'Invalid request.', code: 'invalid_request' },
       400,
-      head,
     );
-  if (error instanceof RequestError) {
-    return jsonResponse({ error: error.message, code: error.code }, error.status, head);
-  }
-  return jsonResponse(
+  if (error instanceof RequestError)
+    return c.json({ error: error.message, code: error.code }, error.status as ContentfulStatusCode);
+  return c.json(
     {
-      error:
-        'Database storage is temporarily unavailable. Your browser draft has not been replaced.',
+      error: 'The database is temporarily unavailable.',
       code: 'storage_unavailable',
     },
     503,
-    head,
   );
 }

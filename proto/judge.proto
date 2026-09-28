@@ -12,9 +12,6 @@ service JudgeService {
   // Acknowledges a durable submission. Disconnecting does not cancel the job.
   rpc Submit(SubmitRequest) returns (JobSnapshot);
   rpc GetJob(JobRequest) returns (JobSnapshot);
-  // Recovery lookup: returns one unfinished job, or the latest finished job.
-  // Keep the original RPC name and repeated field for the deployed website.
-  rpc ListJobs(ListJobsRequest) returns (ListJobsResponse);
   // Queued work can cancel immediately; running work remains CANCELING until
   // cleanup is confirmed. Already terminal jobs return their existing outcome.
   rpc CancelJob(JobRequest) returns (JobSnapshot);
@@ -42,18 +39,6 @@ message JobRequest {
   string job_id = 1;
 }
 
-message ListJobsRequest {
-  string problem_id = 1;
-  reserved 2, 3;
-  reserved "page_size", "page_token";
-}
-
-message ListJobsResponse {
-  repeated JobSnapshot jobs = 1;
-  reserved 2;
-  reserved "next_page_token";
-}
-
 enum JobState {
   JOB_STATE_UNSPECIFIED = 0;
   JOB_STATE_QUEUED = 1;
@@ -69,16 +54,14 @@ enum JobState {
 message JobSnapshot {
   string job_id = 1;
   string problem_id = 2;
-  string problem_version = 3;
   JobState state = 4;
-  // Server timestamps in UTC RFC 3339 format; absent before the transition.
-  string created_at = 5;
-  optional string started_at = 6;
-  optional string finished_at = 7;
   RunResult result = 8;
   optional string error = 9;
   // Monotonically increases with each transition so clients can ignore old snapshots.
   uint64 revision = 10;
+  // Formerly the problem version and timestamps, which no caller used; never reuse these.
+  reserved 3, 5, 6, 7;
+  reserved "problem_version", "created_at", "started_at", "finished_at";
 }
 
 // Mirrors the existing UI result, independently of durable job metadata.

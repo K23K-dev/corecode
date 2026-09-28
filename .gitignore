@@ -1,16 +1,10 @@
 # Dependencies and generated files
 node_modules/
-dist/
 build/
-/judge/judge
-/judge/judge.exe
 .next/
 .vercel/
-.venv/
 __pycache__/
 *.pyc
-playwright-report/
-test-results/
 *.log
 *.tsbuildinfo
 next-env.d.ts

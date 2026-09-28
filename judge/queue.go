@@ -13,17 +13,16 @@ import (
 	judgev1 "github.com/K23K-dev/corecode/judge/gen"
 )
 
-// Admission serializes queue claims and temporary Run reservations. Execution
-// happens outside that lock.
+// jobQueue claims queued jobs into free execution slots and keeps each running job's cancel
+// function, so Stop can reach it.
 type jobQueue struct {
-	ctx       context.Context
-	store     *jobStore
-	executor  *executor
-	admission sync.Mutex
-	mu        sync.Mutex
-	active    map[string]context.CancelFunc
-	wake      chan struct{}
-	workers   sync.WaitGroup
+	ctx      context.Context
+	store    *jobStore
+	executor *executor
+	mu       sync.Mutex
+	active   map[string]context.CancelFunc
+	wake     chan struct{}
+	workers  sync.WaitGroup
 }
 
 func newJobQueue(ctx context.Context, store *jobStore, executor *executor) *jobQueue {
@@ -38,8 +37,6 @@ func (q *jobQueue) notify() {
 }
 
 func (q *jobQueue) beginDrain() {
-	q.admission.Lock()
-	defer q.admission.Unlock()
 	q.executor.beginDrain()
 }
 
@@ -48,22 +45,13 @@ func (q *jobQueue) wait() {
 	q.executor.work.Wait()
 }
 
-// run grades the first case immediately. It never jumps ahead of queued submissions.
+// run grades the first case right away in a free slot. Nothing is saved.
 func (q *jobQueue) run(ctx context.Context, request *judgev1.RunRequest) (*judgev1.RunResult, error) {
 	input, err := prepareExecution(ctx, q.store.pool, request, "example")
 	if err != nil {
 		return nil, err
 	}
-	q.admission.Lock()
-	pending, err := q.store.hasPending(ctx, q.activeIDs())
-	if err == nil && pending {
-		err = rpcError(connect.CodeResourceExhausted, "Submissions are waiting. Try Run again shortly.")
-	}
-	if err == nil {
-		err = q.executor.acquire()
-	}
-	q.admission.Unlock()
-	if err != nil {
+	if err := q.executor.acquire(); err != nil {
 		return nil, err
 	}
 	defer q.notify()
@@ -92,8 +80,6 @@ func (q *jobQueue) serve() {
 
 // dispatch claims one job into a free slot and grades it in the background.
 func (q *jobQueue) dispatch() bool {
-	q.admission.Lock()
-	defer q.admission.Unlock()
 	if q.executor.acquire() != nil {
 		return false
 	}
@@ -125,9 +111,8 @@ func (q *jobQueue) dispatch() bool {
 	return true
 }
 
-// work grades one claimed job and saves the outcome. The claim's 60-second lease
-// outlasts any run (containers die at 25 s), so an expired lease means its judge
-// stopped and another claim may retry the job.
+// work grades one claimed job and saves the outcome. The 60-second lease outlasts any run
+// (containers die at 25 s), so it only expires if this judge stops.
 func (q *jobQueue) work(ctx context.Context, job *claimedJob) {
 	var result *judgev1.RunResult
 	failure, retry := "", false
@@ -150,12 +135,11 @@ func (q *jobQueue) work(ctx context.Context, job *claimedJob) {
 			}
 		}
 	}
-	// Finishing is independent of cancellation. SQL fencing rejects a stale owner
-	// and gives a persisted Stop precedence over the result.
+	// Save even after a cancel: the SQL rejects a stale owner, and a saved Stop beats the result.
 	finishCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if _, err := q.store.finish(finishCtx, job.id, job.ownerToken, result, failure, retry); err != nil && !errors.Is(err, errJobOwnership) {
-		log.Print("Job completion could not be saved; its lease will make it eligible for another attempt.")
+		log.Print("Could not save a job's result; it retries when its lease expires.")
 	}
 }
 

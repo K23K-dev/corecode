@@ -258,106 +258,13 @@ func (x *JobRequest) GetJobId() string {
 	return ""
 }
 
-type ListJobsRequest struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	ProblemId     string                 `protobuf:"bytes,1,opt,name=problem_id,json=problemId,proto3" json:"problem_id,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ListJobsRequest) Reset() {
-	*x = ListJobsRequest{}
-	mi := &file_judge_proto_msgTypes[3]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ListJobsRequest) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ListJobsRequest) ProtoMessage() {}
-
-func (x *ListJobsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_judge_proto_msgTypes[3]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ListJobsRequest.ProtoReflect.Descriptor instead.
-func (*ListJobsRequest) Descriptor() ([]byte, []int) {
-	return file_judge_proto_rawDescGZIP(), []int{3}
-}
-
-func (x *ListJobsRequest) GetProblemId() string {
-	if x != nil {
-		return x.ProblemId
-	}
-	return ""
-}
-
-type ListJobsResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Jobs          []*JobSnapshot         `protobuf:"bytes,1,rep,name=jobs,proto3" json:"jobs,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
-}
-
-func (x *ListJobsResponse) Reset() {
-	*x = ListJobsResponse{}
-	mi := &file_judge_proto_msgTypes[4]
-	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-	ms.StoreMessageInfo(mi)
-}
-
-func (x *ListJobsResponse) String() string {
-	return protoimpl.X.MessageStringOf(x)
-}
-
-func (*ListJobsResponse) ProtoMessage() {}
-
-func (x *ListJobsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_judge_proto_msgTypes[4]
-	if x != nil {
-		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
-		if ms.LoadMessageInfo() == nil {
-			ms.StoreMessageInfo(mi)
-		}
-		return ms
-	}
-	return mi.MessageOf(x)
-}
-
-// Deprecated: Use ListJobsResponse.ProtoReflect.Descriptor instead.
-func (*ListJobsResponse) Descriptor() ([]byte, []int) {
-	return file_judge_proto_rawDescGZIP(), []int{4}
-}
-
-func (x *ListJobsResponse) GetJobs() []*JobSnapshot {
-	if x != nil {
-		return x.Jobs
-	}
-	return nil
-}
-
 type JobSnapshot struct {
-	state          protoimpl.MessageState `protogen:"open.v1"`
-	JobId          string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
-	ProblemId      string                 `protobuf:"bytes,2,opt,name=problem_id,json=problemId,proto3" json:"problem_id,omitempty"`
-	ProblemVersion string                 `protobuf:"bytes,3,opt,name=problem_version,json=problemVersion,proto3" json:"problem_version,omitempty"`
-	State          JobState               `protobuf:"varint,4,opt,name=state,proto3,enum=corecode.judge.v1.JobState" json:"state,omitempty"`
-	// Server timestamps in UTC RFC 3339 format; absent before the transition.
-	CreatedAt  string     `protobuf:"bytes,5,opt,name=created_at,json=createdAt,proto3" json:"created_at,omitempty"`
-	StartedAt  *string    `protobuf:"bytes,6,opt,name=started_at,json=startedAt,proto3,oneof" json:"started_at,omitempty"`
-	FinishedAt *string    `protobuf:"bytes,7,opt,name=finished_at,json=finishedAt,proto3,oneof" json:"finished_at,omitempty"`
-	Result     *RunResult `protobuf:"bytes,8,opt,name=result,proto3" json:"result,omitempty"`
-	Error      *string    `protobuf:"bytes,9,opt,name=error,proto3,oneof" json:"error,omitempty"`
+	state     protoimpl.MessageState `protogen:"open.v1"`
+	JobId     string                 `protobuf:"bytes,1,opt,name=job_id,json=jobId,proto3" json:"job_id,omitempty"`
+	ProblemId string                 `protobuf:"bytes,2,opt,name=problem_id,json=problemId,proto3" json:"problem_id,omitempty"`
+	State     JobState               `protobuf:"varint,4,opt,name=state,proto3,enum=corecode.judge.v1.JobState" json:"state,omitempty"`
+	Result    *RunResult             `protobuf:"bytes,8,opt,name=result,proto3" json:"result,omitempty"`
+	Error     *string                `protobuf:"bytes,9,opt,name=error,proto3,oneof" json:"error,omitempty"`
 	// Monotonically increases with each transition so clients can ignore old snapshots.
 	Revision      uint64 `protobuf:"varint,10,opt,name=revision,proto3" json:"revision,omitempty"`
 	unknownFields protoimpl.UnknownFields
@@ -366,7 +273,7 @@ type JobSnapshot struct {
 
 func (x *JobSnapshot) Reset() {
 	*x = JobSnapshot{}
-	mi := &file_judge_proto_msgTypes[5]
+	mi := &file_judge_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -378,7 +285,7 @@ func (x *JobSnapshot) String() string {
 func (*JobSnapshot) ProtoMessage() {}
 
 func (x *JobSnapshot) ProtoReflect() protoreflect.Message {
-	mi := &file_judge_proto_msgTypes[5]
+	mi := &file_judge_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -391,7 +298,7 @@ func (x *JobSnapshot) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use JobSnapshot.ProtoReflect.Descriptor instead.
 func (*JobSnapshot) Descriptor() ([]byte, []int) {
-	return file_judge_proto_rawDescGZIP(), []int{5}
+	return file_judge_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *JobSnapshot) GetJobId() string {
@@ -408,39 +315,11 @@ func (x *JobSnapshot) GetProblemId() string {
 	return ""
 }
 
-func (x *JobSnapshot) GetProblemVersion() string {
-	if x != nil {
-		return x.ProblemVersion
-	}
-	return ""
-}
-
 func (x *JobSnapshot) GetState() JobState {
 	if x != nil {
 		return x.State
 	}
 	return JobState_JOB_STATE_UNSPECIFIED
-}
-
-func (x *JobSnapshot) GetCreatedAt() string {
-	if x != nil {
-		return x.CreatedAt
-	}
-	return ""
-}
-
-func (x *JobSnapshot) GetStartedAt() string {
-	if x != nil && x.StartedAt != nil {
-		return *x.StartedAt
-	}
-	return ""
-}
-
-func (x *JobSnapshot) GetFinishedAt() string {
-	if x != nil && x.FinishedAt != nil {
-		return *x.FinishedAt
-	}
-	return ""
 }
 
 func (x *JobSnapshot) GetResult() *RunResult {
@@ -477,7 +356,7 @@ type RunResult struct {
 
 func (x *RunResult) Reset() {
 	*x = RunResult{}
-	mi := &file_judge_proto_msgTypes[6]
+	mi := &file_judge_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -489,7 +368,7 @@ func (x *RunResult) String() string {
 func (*RunResult) ProtoMessage() {}
 
 func (x *RunResult) ProtoReflect() protoreflect.Message {
-	mi := &file_judge_proto_msgTypes[6]
+	mi := &file_judge_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -502,7 +381,7 @@ func (x *RunResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RunResult.ProtoReflect.Descriptor instead.
 func (*RunResult) Descriptor() ([]byte, []int) {
-	return file_judge_proto_rawDescGZIP(), []int{6}
+	return file_judge_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *RunResult) GetCases() []*CaseResult {
@@ -547,7 +426,7 @@ type CaseResult struct {
 
 func (x *CaseResult) Reset() {
 	*x = CaseResult{}
-	mi := &file_judge_proto_msgTypes[7]
+	mi := &file_judge_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -559,7 +438,7 @@ func (x *CaseResult) String() string {
 func (*CaseResult) ProtoMessage() {}
 
 func (x *CaseResult) ProtoReflect() protoreflect.Message {
-	mi := &file_judge_proto_msgTypes[7]
+	mi := &file_judge_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -572,7 +451,7 @@ func (x *CaseResult) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use CaseResult.ProtoReflect.Descriptor instead.
 func (*CaseResult) Descriptor() ([]byte, []int) {
-	return file_judge_proto_rawDescGZIP(), []int{7}
+	return file_judge_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *CaseResult) GetName() string {
@@ -636,32 +515,19 @@ const file_judge_proto_rawDesc = "" +
 	"\x04code\x18\x04 \x01(\tR\x04codeJ\x04\b\x05\x10\x06R\x15completion_intent_ids\"#\n" +
 	"\n" +
 	"JobRequest\x12\x15\n" +
-	"\x06job_id\x18\x01 \x01(\tR\x05jobId\"S\n" +
-	"\x0fListJobsRequest\x12\x1d\n" +
-	"\n" +
-	"problem_id\x18\x01 \x01(\tR\tproblemIdJ\x04\b\x02\x10\x03J\x04\b\x03\x10\x04R\tpage_sizeR\n" +
-	"page_token\"]\n" +
-	"\x10ListJobsResponse\x122\n" +
-	"\x04jobs\x18\x01 \x03(\v2\x1e.corecode.judge.v1.JobSnapshotR\x04jobsJ\x04\b\x02\x10\x03R\x0fnext_page_token\"\x9e\x03\n" +
+	"\x06job_id\x18\x01 \x01(\tR\x05jobId\"\xbb\x02\n" +
 	"\vJobSnapshot\x12\x15\n" +
 	"\x06job_id\x18\x01 \x01(\tR\x05jobId\x12\x1d\n" +
 	"\n" +
-	"problem_id\x18\x02 \x01(\tR\tproblemId\x12'\n" +
-	"\x0fproblem_version\x18\x03 \x01(\tR\x0eproblemVersion\x121\n" +
-	"\x05state\x18\x04 \x01(\x0e2\x1b.corecode.judge.v1.JobStateR\x05state\x12\x1d\n" +
-	"\n" +
-	"created_at\x18\x05 \x01(\tR\tcreatedAt\x12\"\n" +
-	"\n" +
-	"started_at\x18\x06 \x01(\tH\x00R\tstartedAt\x88\x01\x01\x12$\n" +
-	"\vfinished_at\x18\a \x01(\tH\x01R\n" +
-	"finishedAt\x88\x01\x01\x124\n" +
+	"problem_id\x18\x02 \x01(\tR\tproblemId\x121\n" +
+	"\x05state\x18\x04 \x01(\x0e2\x1b.corecode.judge.v1.JobStateR\x05state\x124\n" +
 	"\x06result\x18\b \x01(\v2\x1c.corecode.judge.v1.RunResultR\x06result\x12\x19\n" +
-	"\x05error\x18\t \x01(\tH\x02R\x05error\x88\x01\x01\x12\x1a\n" +
+	"\x05error\x18\t \x01(\tH\x00R\x05error\x88\x01\x01\x12\x1a\n" +
 	"\brevision\x18\n" +
-	" \x01(\x04R\brevisionB\r\n" +
-	"\v_started_atB\x0e\n" +
-	"\f_finished_atB\b\n" +
-	"\x06_error\"\x9e\x01\n" +
+	" \x01(\x04R\brevisionB\b\n" +
+	"\x06_errorJ\x04\b\x03\x10\x04J\x04\b\x05\x10\x06J\x04\b\x06\x10\aJ\x04\b\a\x10\bR\x0fproblem_versionR\n" +
+	"created_atR\n" +
+	"started_atR\vfinished_at\"\x9e\x01\n" +
 	"\tRunResult\x123\n" +
 	"\x05cases\x18\x01 \x03(\v2\x1d.corecode.judge.v1.CaseResultR\x05cases\x12\x16\n" +
 	"\x06stdout\x18\x02 \x01(\tR\x06stdout\x12\x1f\n" +
@@ -688,12 +554,11 @@ const file_judge_proto_rawDesc = "" +
 	"\x13JOB_STATE_CANCELING\x10\x03\x12\x17\n" +
 	"\x13JOB_STATE_COMPLETED\x10\x04\x12\x14\n" +
 	"\x10JOB_STATE_FAILED\x10\x05\x12\x16\n" +
-	"\x12JOB_STATE_CANCELED\x10\x062\x88\x03\n" +
+	"\x12JOB_STATE_CANCELED\x10\x062\xb3\x02\n" +
 	"\fJudgeService\x12B\n" +
 	"\x03Run\x12\x1d.corecode.judge.v1.RunRequest\x1a\x1c.corecode.judge.v1.RunResult\x12J\n" +
 	"\x06Submit\x12 .corecode.judge.v1.SubmitRequest\x1a\x1e.corecode.judge.v1.JobSnapshot\x12G\n" +
-	"\x06GetJob\x12\x1d.corecode.judge.v1.JobRequest\x1a\x1e.corecode.judge.v1.JobSnapshot\x12S\n" +
-	"\bListJobs\x12\".corecode.judge.v1.ListJobsRequest\x1a#.corecode.judge.v1.ListJobsResponse\x12J\n" +
+	"\x06GetJob\x12\x1d.corecode.judge.v1.JobRequest\x1a\x1e.corecode.judge.v1.JobSnapshot\x12J\n" +
 	"\tCancelJob\x12\x1d.corecode.judge.v1.JobRequest\x1a\x1e.corecode.judge.v1.JobSnapshotB0Z.github.com/K23K-dev/corecode/judge/gen;judgev1b\x06proto3"
 
 var (
@@ -709,38 +574,33 @@ func file_judge_proto_rawDescGZIP() []byte {
 }
 
 var file_judge_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_judge_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_judge_proto_msgTypes = make([]protoimpl.MessageInfo, 6)
 var file_judge_proto_goTypes = []any{
-	(JobState)(0),            // 0: corecode.judge.v1.JobState
-	(*RunRequest)(nil),       // 1: corecode.judge.v1.RunRequest
-	(*SubmitRequest)(nil),    // 2: corecode.judge.v1.SubmitRequest
-	(*JobRequest)(nil),       // 3: corecode.judge.v1.JobRequest
-	(*ListJobsRequest)(nil),  // 4: corecode.judge.v1.ListJobsRequest
-	(*ListJobsResponse)(nil), // 5: corecode.judge.v1.ListJobsResponse
-	(*JobSnapshot)(nil),      // 6: corecode.judge.v1.JobSnapshot
-	(*RunResult)(nil),        // 7: corecode.judge.v1.RunResult
-	(*CaseResult)(nil),       // 8: corecode.judge.v1.CaseResult
+	(JobState)(0),         // 0: corecode.judge.v1.JobState
+	(*RunRequest)(nil),    // 1: corecode.judge.v1.RunRequest
+	(*SubmitRequest)(nil), // 2: corecode.judge.v1.SubmitRequest
+	(*JobRequest)(nil),    // 3: corecode.judge.v1.JobRequest
+	(*JobSnapshot)(nil),   // 4: corecode.judge.v1.JobSnapshot
+	(*RunResult)(nil),     // 5: corecode.judge.v1.RunResult
+	(*CaseResult)(nil),    // 6: corecode.judge.v1.CaseResult
 }
 var file_judge_proto_depIdxs = []int32{
-	6, // 0: corecode.judge.v1.ListJobsResponse.jobs:type_name -> corecode.judge.v1.JobSnapshot
-	0, // 1: corecode.judge.v1.JobSnapshot.state:type_name -> corecode.judge.v1.JobState
-	7, // 2: corecode.judge.v1.JobSnapshot.result:type_name -> corecode.judge.v1.RunResult
-	8, // 3: corecode.judge.v1.RunResult.cases:type_name -> corecode.judge.v1.CaseResult
-	1, // 4: corecode.judge.v1.JudgeService.Run:input_type -> corecode.judge.v1.RunRequest
-	2, // 5: corecode.judge.v1.JudgeService.Submit:input_type -> corecode.judge.v1.SubmitRequest
-	3, // 6: corecode.judge.v1.JudgeService.GetJob:input_type -> corecode.judge.v1.JobRequest
-	4, // 7: corecode.judge.v1.JudgeService.ListJobs:input_type -> corecode.judge.v1.ListJobsRequest
-	3, // 8: corecode.judge.v1.JudgeService.CancelJob:input_type -> corecode.judge.v1.JobRequest
-	7, // 9: corecode.judge.v1.JudgeService.Run:output_type -> corecode.judge.v1.RunResult
-	6, // 10: corecode.judge.v1.JudgeService.Submit:output_type -> corecode.judge.v1.JobSnapshot
-	6, // 11: corecode.judge.v1.JudgeService.GetJob:output_type -> corecode.judge.v1.JobSnapshot
-	5, // 12: corecode.judge.v1.JudgeService.ListJobs:output_type -> corecode.judge.v1.ListJobsResponse
-	6, // 13: corecode.judge.v1.JudgeService.CancelJob:output_type -> corecode.judge.v1.JobSnapshot
-	9, // [9:14] is the sub-list for method output_type
-	4, // [4:9] is the sub-list for method input_type
-	4, // [4:4] is the sub-list for extension type_name
-	4, // [4:4] is the sub-list for extension extendee
-	0, // [0:4] is the sub-list for field type_name
+	0, // 0: corecode.judge.v1.JobSnapshot.state:type_name -> corecode.judge.v1.JobState
+	5, // 1: corecode.judge.v1.JobSnapshot.result:type_name -> corecode.judge.v1.RunResult
+	6, // 2: corecode.judge.v1.RunResult.cases:type_name -> corecode.judge.v1.CaseResult
+	1, // 3: corecode.judge.v1.JudgeService.Run:input_type -> corecode.judge.v1.RunRequest
+	2, // 4: corecode.judge.v1.JudgeService.Submit:input_type -> corecode.judge.v1.SubmitRequest
+	3, // 5: corecode.judge.v1.JudgeService.GetJob:input_type -> corecode.judge.v1.JobRequest
+	3, // 6: corecode.judge.v1.JudgeService.CancelJob:input_type -> corecode.judge.v1.JobRequest
+	5, // 7: corecode.judge.v1.JudgeService.Run:output_type -> corecode.judge.v1.RunResult
+	4, // 8: corecode.judge.v1.JudgeService.Submit:output_type -> corecode.judge.v1.JobSnapshot
+	4, // 9: corecode.judge.v1.JudgeService.GetJob:output_type -> corecode.judge.v1.JobSnapshot
+	4, // 10: corecode.judge.v1.JudgeService.CancelJob:output_type -> corecode.judge.v1.JobSnapshot
+	7, // [7:11] is the sub-list for method output_type
+	3, // [3:7] is the sub-list for method input_type
+	3, // [3:3] is the sub-list for extension type_name
+	3, // [3:3] is the sub-list for extension extendee
+	0, // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_judge_proto_init() }
@@ -748,16 +608,16 @@ func file_judge_proto_init() {
 	if File_judge_proto != nil {
 		return
 	}
+	file_judge_proto_msgTypes[3].OneofWrappers = []any{}
+	file_judge_proto_msgTypes[4].OneofWrappers = []any{}
 	file_judge_proto_msgTypes[5].OneofWrappers = []any{}
-	file_judge_proto_msgTypes[6].OneofWrappers = []any{}
-	file_judge_proto_msgTypes[7].OneofWrappers = []any{}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_judge_proto_rawDesc), len(file_judge_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   8,
+			NumMessages:   6,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

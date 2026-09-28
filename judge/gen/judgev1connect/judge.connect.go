@@ -39,8 +39,6 @@ const (
 	JudgeServiceSubmitProcedure = "/corecode.judge.v1.JudgeService/Submit"
 	// JudgeServiceGetJobProcedure is the fully-qualified name of the JudgeService's GetJob RPC.
 	JudgeServiceGetJobProcedure = "/corecode.judge.v1.JudgeService/GetJob"
-	// JudgeServiceListJobsProcedure is the fully-qualified name of the JudgeService's ListJobs RPC.
-	JudgeServiceListJobsProcedure = "/corecode.judge.v1.JudgeService/ListJobs"
 	// JudgeServiceCancelJobProcedure is the fully-qualified name of the JudgeService's CancelJob RPC.
 	JudgeServiceCancelJobProcedure = "/corecode.judge.v1.JudgeService/CancelJob"
 )
@@ -52,9 +50,6 @@ type JudgeServiceClient interface {
 	// Acknowledges a durable submission. Disconnecting does not cancel the job.
 	Submit(context.Context, *gen.SubmitRequest) (*gen.JobSnapshot, error)
 	GetJob(context.Context, *gen.JobRequest) (*gen.JobSnapshot, error)
-	// Recovery lookup: returns one unfinished job, or the latest finished job.
-	// Keep the original RPC name and repeated field for the deployed website.
-	ListJobs(context.Context, *gen.ListJobsRequest) (*gen.ListJobsResponse, error)
 	// Queued work can cancel immediately; running work remains CANCELING until
 	// cleanup is confirmed. Already terminal jobs return their existing outcome.
 	CancelJob(context.Context, *gen.JobRequest) (*gen.JobSnapshot, error)
@@ -89,12 +84,6 @@ func NewJudgeServiceClient(httpClient connect.HTTPClient, baseURL string, opts .
 			connect.WithSchema(judgeServiceMethods.ByName("GetJob")),
 			connect.WithClientOptions(opts...),
 		),
-		listJobs: connect.NewClient[gen.ListJobsRequest, gen.ListJobsResponse](
-			httpClient,
-			baseURL+JudgeServiceListJobsProcedure,
-			connect.WithSchema(judgeServiceMethods.ByName("ListJobs")),
-			connect.WithClientOptions(opts...),
-		),
 		cancelJob: connect.NewClient[gen.JobRequest, gen.JobSnapshot](
 			httpClient,
 			baseURL+JudgeServiceCancelJobProcedure,
@@ -109,7 +98,6 @@ type judgeServiceClient struct {
 	run       *connect.Client[gen.RunRequest, gen.RunResult]
 	submit    *connect.Client[gen.SubmitRequest, gen.JobSnapshot]
 	getJob    *connect.Client[gen.JobRequest, gen.JobSnapshot]
-	listJobs  *connect.Client[gen.ListJobsRequest, gen.ListJobsResponse]
 	cancelJob *connect.Client[gen.JobRequest, gen.JobSnapshot]
 }
 
@@ -140,15 +128,6 @@ func (c *judgeServiceClient) GetJob(ctx context.Context, req *gen.JobRequest) (*
 	return nil, err
 }
 
-// ListJobs calls corecode.judge.v1.JudgeService.ListJobs.
-func (c *judgeServiceClient) ListJobs(ctx context.Context, req *gen.ListJobsRequest) (*gen.ListJobsResponse, error) {
-	response, err := c.listJobs.CallUnary(ctx, connect.NewRequest(req))
-	if response != nil {
-		return response.Msg, err
-	}
-	return nil, err
-}
-
 // CancelJob calls corecode.judge.v1.JudgeService.CancelJob.
 func (c *judgeServiceClient) CancelJob(ctx context.Context, req *gen.JobRequest) (*gen.JobSnapshot, error) {
 	response, err := c.cancelJob.CallUnary(ctx, connect.NewRequest(req))
@@ -165,9 +144,6 @@ type JudgeServiceHandler interface {
 	// Acknowledges a durable submission. Disconnecting does not cancel the job.
 	Submit(context.Context, *gen.SubmitRequest) (*gen.JobSnapshot, error)
 	GetJob(context.Context, *gen.JobRequest) (*gen.JobSnapshot, error)
-	// Recovery lookup: returns one unfinished job, or the latest finished job.
-	// Keep the original RPC name and repeated field for the deployed website.
-	ListJobs(context.Context, *gen.ListJobsRequest) (*gen.ListJobsResponse, error)
 	// Queued work can cancel immediately; running work remains CANCELING until
 	// cleanup is confirmed. Already terminal jobs return their existing outcome.
 	CancelJob(context.Context, *gen.JobRequest) (*gen.JobSnapshot, error)
@@ -198,12 +174,6 @@ func NewJudgeServiceHandler(svc JudgeServiceHandler, opts ...connect.HandlerOpti
 		connect.WithSchema(judgeServiceMethods.ByName("GetJob")),
 		connect.WithHandlerOptions(opts...),
 	)
-	judgeServiceListJobsHandler := connect.NewUnaryHandlerSimple(
-		JudgeServiceListJobsProcedure,
-		svc.ListJobs,
-		connect.WithSchema(judgeServiceMethods.ByName("ListJobs")),
-		connect.WithHandlerOptions(opts...),
-	)
 	judgeServiceCancelJobHandler := connect.NewUnaryHandlerSimple(
 		JudgeServiceCancelJobProcedure,
 		svc.CancelJob,
@@ -218,8 +188,6 @@ func NewJudgeServiceHandler(svc JudgeServiceHandler, opts ...connect.HandlerOpti
 			judgeServiceSubmitHandler.ServeHTTP(w, r)
 		case JudgeServiceGetJobProcedure:
 			judgeServiceGetJobHandler.ServeHTTP(w, r)
-		case JudgeServiceListJobsProcedure:
-			judgeServiceListJobsHandler.ServeHTTP(w, r)
 		case JudgeServiceCancelJobProcedure:
 			judgeServiceCancelJobHandler.ServeHTTP(w, r)
 		default:
@@ -241,10 +209,6 @@ func (UnimplementedJudgeServiceHandler) Submit(context.Context, *gen.SubmitReque
 
 func (UnimplementedJudgeServiceHandler) GetJob(context.Context, *gen.JobRequest) (*gen.JobSnapshot, error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("corecode.judge.v1.JudgeService.GetJob is not implemented"))
-}
-
-func (UnimplementedJudgeServiceHandler) ListJobs(context.Context, *gen.ListJobsRequest) (*gen.ListJobsResponse, error) {
-	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("corecode.judge.v1.JudgeService.ListJobs is not implemented"))
 }
 
 func (UnimplementedJudgeServiceHandler) CancelJob(context.Context, *gen.JobRequest) (*gen.JobSnapshot, error) {

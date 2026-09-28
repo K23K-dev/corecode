@@ -12,7 +12,7 @@ import type { Message } from '@bufbuild/protobuf';
 export const file_judge: GenFile =
   /*@__PURE__*/
   fileDesc(
-    'CgtqdWRnZS5wcm90bxIRY29yZWNvZGUuanVkZ2UudjEiRwoKUnVuUmVxdWVzdBISCgpwcm9ibGVtX2lkGAEgASgJEhcKD3Byb2JsZW1fdmVyc2lvbhgCIAEoCRIMCgRjb2RlGAMgASgJIn4KDVN1Ym1pdFJlcXVlc3QSFQoNc3VibWlzc2lvbl9pZBgBIAEoCRISCgpwcm9ibGVtX2lkGAIgASgJEhcKD3Byb2JsZW1fdmVyc2lvbhgDIAEoCRIMCgRjb2RlGAQgASgJSgQIBRAGUhVjb21wbGV0aW9uX2ludGVudF9pZHMiHAoKSm9iUmVxdWVzdBIOCgZqb2JfaWQYASABKAkiSAoPTGlzdEpvYnNSZXF1ZXN0EhIKCnByb2JsZW1faWQYASABKAlKBAgCEANKBAgDEARSCXBhZ2Vfc2l6ZVIKcGFnZV90b2tlbiJXChBMaXN0Sm9ic1Jlc3BvbnNlEiwKBGpvYnMYASADKAsyHi5jb3JlY29kZS5qdWRnZS52MS5Kb2JTbmFwc2hvdEoECAIQA1IPbmV4dF9wYWdlX3Rva2VuIroCCgtKb2JTbmFwc2hvdBIOCgZqb2JfaWQYASABKAkSEgoKcHJvYmxlbV9pZBgCIAEoCRIXCg9wcm9ibGVtX3ZlcnNpb24YAyABKAkSKgoFc3RhdGUYBCABKA4yGy5jb3JlY29kZS5qdWRnZS52MS5Kb2JTdGF0ZRISCgpjcmVhdGVkX2F0GAUgASgJEhcKCnN0YXJ0ZWRfYXQYBiABKAlIAIgBARIYCgtmaW5pc2hlZF9hdBgHIAEoCUgBiAEBEiwKBnJlc3VsdBgIIAEoCzIcLmNvcmVjb2RlLmp1ZGdlLnYxLlJ1blJlc3VsdBISCgVlcnJvchgJIAEoCUgCiAEBEhAKCHJldmlzaW9uGAogASgEQg0KC19zdGFydGVkX2F0Qg4KDF9maW5pc2hlZF9hdEIICgZfZXJyb3IifAoJUnVuUmVzdWx0EiwKBWNhc2VzGAEgAygLMh0uY29yZWNvZGUuanVkZ2UudjEuQ2FzZVJlc3VsdBIOCgZzdGRvdXQYAiABKAkSEwoLZHVyYXRpb25fbXMYAyABKAESEgoFZXJyb3IYBCABKAlIAIgBAUIICgZfZXJyb3IiqwEKCkNhc2VSZXN1bHQSDAoEbmFtZRgBIAEoCRINCgVpbnB1dBgCIAEoCRIVCghleHBlY3RlZBgDIAEoCUgAiAEBEhMKBmFjdHVhbBgEIAEoCUgBiAEBEhMKBnBhc3NlZBgFIAEoCEgCiAEBEhIKBWVycm9yGAYgASgJSAOIAQFCCwoJX2V4cGVjdGVkQgkKB19hY3R1YWxCCQoHX3Bhc3NlZEIICgZfZXJyb3IqsgEKCEpvYlN0YXRlEhkKFUpPQl9TVEFURV9VTlNQRUNJRklFRBAAEhQKEEpPQl9TVEFURV9RVUVVRUQQARIVChFKT0JfU1RBVEVfUlVOTklORxACEhcKE0pPQl9TVEFURV9DQU5DRUxJTkcQAxIXChNKT0JfU1RBVEVfQ09NUExFVEVEEAQSFAoQSk9CX1NUQVRFX0ZBSUxFRBAFEhYKEkpPQl9TVEFURV9DQU5DRUxFRBAGMogDCgxKdWRnZVNlcnZpY2USQgoDUnVuEh0uY29yZWNvZGUuanVkZ2UudjEuUnVuUmVxdWVzdBocLmNvcmVjb2RlLmp1ZGdlLnYxLlJ1blJlc3VsdBJKCgZTdWJtaXQSIC5jb3JlY29kZS5qdWRnZS52MS5TdWJtaXRSZXF1ZXN0Gh4uY29yZWNvZGUuanVkZ2UudjEuSm9iU25hcHNob3QSRwoGR2V0Sm9iEh0uY29yZWNvZGUuanVkZ2UudjEuSm9iUmVxdWVzdBoeLmNvcmVjb2RlLmp1ZGdlLnYxLkpvYlNuYXBzaG90ElMKCExpc3RKb2JzEiIuY29yZWNvZGUuanVkZ2UudjEuTGlzdEpvYnNSZXF1ZXN0GiMuY29yZWNvZGUuanVkZ2UudjEuTGlzdEpvYnNSZXNwb25zZRJKCglDYW5jZWxKb2ISHS5jb3JlY29kZS5qdWRnZS52MS5Kb2JSZXF1ZXN0Gh4uY29yZWNvZGUuanVkZ2UudjEuSm9iU25hcHNob3RCMFouZ2l0aHViLmNvbS9LMjNLLWRldi9jb3JlY29kZS9qdWRnZS9nZW47anVkZ2V2MWIGcHJvdG8z',
+    'CgtqdWRnZS5wcm90bxIRY29yZWNvZGUuanVkZ2UudjEiRwoKUnVuUmVxdWVzdBISCgpwcm9ibGVtX2lkGAEgASgJEhcKD3Byb2JsZW1fdmVyc2lvbhgCIAEoCRIMCgRjb2RlGAMgASgJIn4KDVN1Ym1pdFJlcXVlc3QSFQoNc3VibWlzc2lvbl9pZBgBIAEoCRISCgpwcm9ibGVtX2lkGAIgASgJEhcKD3Byb2JsZW1fdmVyc2lvbhgDIAEoCRIMCgRjb2RlGAQgASgJSgQIBRAGUhVjb21wbGV0aW9uX2ludGVudF9pZHMiHAoKSm9iUmVxdWVzdBIOCgZqb2JfaWQYASABKAkiiQIKC0pvYlNuYXBzaG90Eg4KBmpvYl9pZBgBIAEoCRISCgpwcm9ibGVtX2lkGAIgASgJEioKBXN0YXRlGAQgASgOMhsuY29yZWNvZGUuanVkZ2UudjEuSm9iU3RhdGUSLAoGcmVzdWx0GAggASgLMhwuY29yZWNvZGUuanVkZ2UudjEuUnVuUmVzdWx0EhIKBWVycm9yGAkgASgJSACIAQESEAoIcmV2aXNpb24YCiABKARCCAoGX2Vycm9ySgQIAxAESgQIBRAGSgQIBhAHSgQIBxAIUg9wcm9ibGVtX3ZlcnNpb25SCmNyZWF0ZWRfYXRSCnN0YXJ0ZWRfYXRSC2ZpbmlzaGVkX2F0InwKCVJ1blJlc3VsdBIsCgVjYXNlcxgBIAMoCzIdLmNvcmVjb2RlLmp1ZGdlLnYxLkNhc2VSZXN1bHQSDgoGc3Rkb3V0GAIgASgJEhMKC2R1cmF0aW9uX21zGAMgASgBEhIKBWVycm9yGAQgASgJSACIAQFCCAoGX2Vycm9yIqsBCgpDYXNlUmVzdWx0EgwKBG5hbWUYASABKAkSDQoFaW5wdXQYAiABKAkSFQoIZXhwZWN0ZWQYAyABKAlIAIgBARITCgZhY3R1YWwYBCABKAlIAYgBARITCgZwYXNzZWQYBSABKAhIAogBARISCgVlcnJvchgGIAEoCUgDiAEBQgsKCV9leHBlY3RlZEIJCgdfYWN0dWFsQgkKB19wYXNzZWRCCAoGX2Vycm9yKrIBCghKb2JTdGF0ZRIZChVKT0JfU1RBVEVfVU5TUEVDSUZJRUQQABIUChBKT0JfU1RBVEVfUVVFVUVEEAESFQoRSk9CX1NUQVRFX1JVTk5JTkcQAhIXChNKT0JfU1RBVEVfQ0FOQ0VMSU5HEAMSFwoTSk9CX1NUQVRFX0NPTVBMRVRFRBAEEhQKEEpPQl9TVEFURV9GQUlMRUQQBRIWChJKT0JfU1RBVEVfQ0FOQ0VMRUQQBjKzAgoMSnVkZ2VTZXJ2aWNlEkIKA1J1bhIdLmNvcmVjb2RlLmp1ZGdlLnYxLlJ1blJlcXVlc3QaHC5jb3JlY29kZS5qdWRnZS52MS5SdW5SZXN1bHQSSgoGU3VibWl0EiAuY29yZWNvZGUuanVkZ2UudjEuU3VibWl0UmVxdWVzdBoeLmNvcmVjb2RlLmp1ZGdlLnYxLkpvYlNuYXBzaG90EkcKBkdldEpvYhIdLmNvcmVjb2RlLmp1ZGdlLnYxLkpvYlJlcXVlc3QaHi5jb3JlY29kZS5qdWRnZS52MS5Kb2JTbmFwc2hvdBJKCglDYW5jZWxKb2ISHS5jb3JlY29kZS5qdWRnZS52MS5Kb2JSZXF1ZXN0Gh4uY29yZWNvZGUuanVkZ2UudjEuSm9iU25hcHNob3RCMFouZ2l0aHViLmNvbS9LMjNLLWRldi9jb3JlY29kZS9qdWRnZS9nZW47anVkZ2V2MWIGcHJvdG8z',
   );
 
 /**
@@ -94,42 +94,6 @@ export type JobRequest = Message<'corecode.judge.v1.JobRequest'> & {
 export const JobRequestSchema: GenMessage<JobRequest> = /*@__PURE__*/ messageDesc(file_judge, 2);
 
 /**
- * @generated from message corecode.judge.v1.ListJobsRequest
- */
-export type ListJobsRequest = Message<'corecode.judge.v1.ListJobsRequest'> & {
-  /**
-   * @generated from field: string problem_id = 1;
-   */
-  problemId: string;
-};
-
-/**
- * Describes the message corecode.judge.v1.ListJobsRequest.
- * Use `create(ListJobsRequestSchema)` to create a new message.
- */
-export const ListJobsRequestSchema: GenMessage<ListJobsRequest> =
-  /*@__PURE__*/
-  messageDesc(file_judge, 3);
-
-/**
- * @generated from message corecode.judge.v1.ListJobsResponse
- */
-export type ListJobsResponse = Message<'corecode.judge.v1.ListJobsResponse'> & {
-  /**
-   * @generated from field: repeated corecode.judge.v1.JobSnapshot jobs = 1;
-   */
-  jobs: JobSnapshot[];
-};
-
-/**
- * Describes the message corecode.judge.v1.ListJobsResponse.
- * Use `create(ListJobsResponseSchema)` to create a new message.
- */
-export const ListJobsResponseSchema: GenMessage<ListJobsResponse> =
-  /*@__PURE__*/
-  messageDesc(file_judge, 4);
-
-/**
  * @generated from message corecode.judge.v1.JobSnapshot
  */
 export type JobSnapshot = Message<'corecode.judge.v1.JobSnapshot'> & {
@@ -144,31 +108,9 @@ export type JobSnapshot = Message<'corecode.judge.v1.JobSnapshot'> & {
   problemId: string;
 
   /**
-   * @generated from field: string problem_version = 3;
-   */
-  problemVersion: string;
-
-  /**
    * @generated from field: corecode.judge.v1.JobState state = 4;
    */
   state: JobState;
-
-  /**
-   * Server timestamps in UTC RFC 3339 format; absent before the transition.
-   *
-   * @generated from field: string created_at = 5;
-   */
-  createdAt: string;
-
-  /**
-   * @generated from field: optional string started_at = 6;
-   */
-  startedAt?: string | undefined;
-
-  /**
-   * @generated from field: optional string finished_at = 7;
-   */
-  finishedAt?: string | undefined;
 
   /**
    * @generated from field: corecode.judge.v1.RunResult result = 8;
@@ -192,7 +134,7 @@ export type JobSnapshot = Message<'corecode.judge.v1.JobSnapshot'> & {
  * Describes the message corecode.judge.v1.JobSnapshot.
  * Use `create(JobSnapshotSchema)` to create a new message.
  */
-export const JobSnapshotSchema: GenMessage<JobSnapshot> = /*@__PURE__*/ messageDesc(file_judge, 5);
+export const JobSnapshotSchema: GenMessage<JobSnapshot> = /*@__PURE__*/ messageDesc(file_judge, 3);
 
 /**
  * Mirrors the existing UI result, independently of durable job metadata.
@@ -225,7 +167,7 @@ export type RunResult = Message<'corecode.judge.v1.RunResult'> & {
  * Describes the message corecode.judge.v1.RunResult.
  * Use `create(RunResultSchema)` to create a new message.
  */
-export const RunResultSchema: GenMessage<RunResult> = /*@__PURE__*/ messageDesc(file_judge, 6);
+export const RunResultSchema: GenMessage<RunResult> = /*@__PURE__*/ messageDesc(file_judge, 4);
 
 /**
  * @generated from message corecode.judge.v1.CaseResult
@@ -266,7 +208,7 @@ export type CaseResult = Message<'corecode.judge.v1.CaseResult'> & {
  * Describes the message corecode.judge.v1.CaseResult.
  * Use `create(CaseResultSchema)` to create a new message.
  */
-export const CaseResultSchema: GenMessage<CaseResult> = /*@__PURE__*/ messageDesc(file_judge, 7);
+export const CaseResultSchema: GenMessage<CaseResult> = /*@__PURE__*/ messageDesc(file_judge, 5);
 
 /**
  * @generated from enum corecode.judge.v1.JobState
@@ -351,17 +293,6 @@ export const JudgeService: GenService<{
     methodKind: 'unary';
     input: typeof JobRequestSchema;
     output: typeof JobSnapshotSchema;
-  };
-  /**
-   * Recovery lookup: returns one unfinished job, or the latest finished job.
-   * Keep the original RPC name and repeated field for the deployed website.
-   *
-   * @generated from rpc corecode.judge.v1.JudgeService.ListJobs
-   */
-  listJobs: {
-    methodKind: 'unary';
-    input: typeof ListJobsRequestSchema;
-    output: typeof ListJobsResponseSchema;
   };
   /**
    * Queued work can cancel immediately; running work remains CANCELING until

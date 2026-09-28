@@ -3,17 +3,8 @@ import type { ReactNode } from 'react';
 import { Anchor, Box, Group } from '@mantine/core';
 import { Code2 } from 'lucide-react';
 
-/**
- * The header on every screen: the brand links home, followed by the page's own navigation.
- * `onHome` replaces the link's navigation, for pages that must stop work before leaving.
- */
-export default function TopBar({
-  onHome,
-  children,
-}: {
-  onHome?: () => void;
-  children?: ReactNode;
-}) {
+/** The header on every screen: the brand links home, followed by the page's own navigation. */
+export default function TopBar({ children }: { children?: ReactNode }) {
   return (
     <Box
       component="header"
@@ -30,13 +21,6 @@ export default function TopBar({
         fw={700}
         underline="never"
         aria-label="Code Practice library"
-        onClick={
-          onHome &&
-          ((event) => {
-            event.preventDefault();
-            onHome();
-          })
-        }
       >
         <Group gap={8} wrap="nowrap">
           <Code2 size={21} />

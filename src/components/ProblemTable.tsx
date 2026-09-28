@@ -1,12 +1,9 @@
 import { memo } from 'react';
-import { ActionIcon, Button, Table, Text, UnstyledButton } from '@mantine/core';
-import { ArrowDown, ArrowUp, ArrowUpDown, Circle, CircleCheck, FileText, Star } from 'lucide-react';
+import { ActionIcon, Table, Text, UnstyledButton } from '@mantine/core';
+import { Circle, CircleCheck, FileText, Star } from 'lucide-react';
 import type { Problem } from '../schemas/catalog';
 import type { ProgressData } from '../schemas/progress';
-import type { ProblemSort } from '../hooks/useProblemList';
 import { DIFFICULTY_COLORS } from '../lib/theme';
-
-type SortKey = 'title' | 'difficulty';
 
 // Opening a deck changes only its disclosure shell, not its problem rows.
 const ProblemTable = memo(function ProblemTable({
@@ -14,53 +11,31 @@ const ProblemTable = memo(function ProblemTable({
   label,
   progress,
   starred,
-  sort,
-  onSort,
   onSelect,
   onStar,
-  onSolved,
 }: {
   items: Problem[];
   label: string;
   progress: ProgressData;
   starred: string[];
-  sort: ProblemSort;
-  onSort: (key: SortKey) => void;
   onSelect: (problem: Problem, tab?: 'question' | 'solution') => void;
   onStar: (id: string, value: boolean) => void;
-  onSolved: (problem: Problem, value: boolean) => void;
 }) {
   const stars = new Set(starred);
-  const sortHeader = (key: SortKey, text: string) => {
-    const Icon =
-      sort?.key !== key ? ArrowUpDown : sort.direction === 'ascending' ? ArrowUp : ArrowDown;
-    return (
-      <Table.Th aria-sort={sort?.key === key ? sort.direction : 'none'}>
-        <Button
-          variant="subtle"
-          color="gray"
-          size="compact-sm"
-          rightSection={<Icon size={12} />}
-          onClick={() => onSort(key)}
-        >
-          {text}
-        </Button>
-      </Table.Th>
-    );
-  };
   return (
     <Table highlightOnHover aria-label={label}>
       <Table.Thead>
         <Table.Tr>
           <Table.Th w={70}>Status</Table.Th>
           <Table.Th w={60}>Star</Table.Th>
-          {sortHeader('title', 'Problem')}
-          {sortHeader('difficulty', 'Difficulty')}
+          <Table.Th>Problem</Table.Th>
+          <Table.Th>Difficulty</Table.Th>
           <Table.Th w={80}>Solution</Table.Th>
         </Table.Tr>
       </Table.Thead>
       <Table.Tbody>
         {items.map((problem) => {
+          // Solved comes only from an accepted submission.
           const solved = Boolean(progress.exercises[problem.id]?.solved);
           const isStarred = stars.has(problem.id);
           return (
@@ -74,16 +49,11 @@ const ProblemTable = memo(function ProblemTable({
               }}
             >
               <Table.Td>
-                <ActionIcon
-                  variant="subtle"
-                  color={solved ? 'teal' : 'gray'}
-                  aria-label={`Mark ${problem.title} ${solved ? 'incomplete' : 'complete'}`}
-                  aria-pressed={solved}
-                  title={solved ? 'Mark incomplete' : 'Mark complete'}
-                  onClick={() => onSolved(problem, !solved)}
-                >
-                  {solved ? <CircleCheck size={18} /> : <Circle size={17} />}
-                </ActionIcon>
+                {solved ? (
+                  <CircleCheck size={18} color="var(--mantine-color-teal-5)" aria-label="Solved" />
+                ) : (
+                  <Circle size={17} color="var(--mantine-color-dark-2)" aria-label="Not solved" />
+                )}
               </Table.Td>
               <Table.Td>
                 <ActionIcon

@@ -5,19 +5,15 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"math"
 	"regexp"
 	"strings"
-	"unicode/utf16"
-	"unicode/utf8"
 
 	"connectrpc.com/connect"
 	judgev1 "github.com/K23K-dev/corecode/judge/gen"
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
+	"google.golang.org/protobuf/encoding/protojson"
 )
-
-const maxRunnerPayload = 1024 * 1024
 
 var problemVersionPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
 
@@ -30,14 +26,12 @@ type executionInput struct {
 }
 
 func prepareExecution(ctx context.Context, pool *pgxpool.Pool, request *judgev1.RunRequest, mode string) (executionInput, error) {
-	if request == nil || !validProblemID(request.GetProblemId()) || !problemVersionPattern.MatchString(request.GetProblemVersion()) {
+	id := request.GetProblemId()
+	if strings.TrimSpace(id) == "" || len(id) > 800 || !problemVersionPattern.MatchString(request.GetProblemVersion()) {
 		return executionInput{}, rpcError(connect.CodeInvalidArgument, "Provide a valid problem ID and version.")
 	}
-	if !utf8.ValidString(request.Code) || len(request.Code) > 51200 || len(utf16.Encode([]rune(request.Code))) > 32768 {
-		return executionInput{}, rpcError(connect.CodeInvalidArgument, "Keep code under 32,768 characters and 50 KiB.")
-	}
-	if mode != "example" && mode != "submit" {
-		return executionInput{}, rpcError(connect.CodeInvalidArgument, "Invalid run mode.")
+	if len(request.Code) > 51200 {
+		return executionInput{}, rpcError(connect.CodeInvalidArgument, "Keep code under 50 KiB.")
 	}
 
 	var version string
@@ -46,7 +40,7 @@ func prepareExecution(ctx context.Context, pool *pgxpool.Pool, request *judgev1.
 	err := pool.QueryRow(ctx, `SELECT p.current_version, s.content, s.spec_version
 		FROM cp_problems p
 		LEFT JOIN cp_grading_specs s ON s.exercise_id = p.id AND s.problem_version = p.current_version
-		WHERE p.id = $1 AND p.active`, request.ProblemId).Scan(&version, &rawSpec, &specVersion)
+		WHERE p.id = $1 AND p.active`, id).Scan(&version, &rawSpec, &specVersion)
 	if errors.Is(err, pgx.ErrNoRows) {
 		return executionInput{}, rpcError(connect.CodeNotFound, "Problem not found.")
 	}
@@ -63,7 +57,7 @@ func prepareExecution(ctx context.Context, pool *pgxpool.Pool, request *judgev1.
 	if specVersion == nil {
 		return executionInput{}, invalidGradingSpec()
 	}
-	return makeExecutionInput(request.ProblemId, version, *specVersion, request.Code, mode, rawSpec)
+	return makeExecutionInput(id, version, *specVersion, request.Code, mode, rawSpec)
 }
 
 // Accepted submissions retain their exact immutable spec even after the public
@@ -90,36 +84,18 @@ func prepareStoredExecution(ctx context.Context, pool *pgxpool.Pool, problemID, 
 }
 
 func invalidGradingSpec() error {
-	return rpcError(connect.CodeFailedPrecondition, "The grading specification is unavailable or invalid. Nothing was marked solved.")
+	return rpcError(connect.CodeFailedPrecondition, "The grading spec is missing or invalid.")
 }
 
+// makeExecutionInput builds the grader's stdin. A CHECK constraint on cp_grading_specs
+// already guarantees each spec has a known runtime and 1–32 cases.
 func makeExecutionInput(problemID, version, specVersion, code, mode string, rawSpec []byte) (executionInput, error) {
-	unavailable := invalidGradingSpec()
-	var spec map[string]any
-	if len(rawSpec) > maxRunnerPayload || json.Unmarshal(rawSpec, &spec) != nil || !safeObject(spec) {
-		return executionInput{}, unavailable
+	var spec struct {
+		Runtime string            `json:"runtime"`
+		Cases   []json.RawMessage `json:"cases"`
 	}
-	runtime, _ := spec["runtime"].(string)
-	switch runtime {
-	case "python", "sql", "shell", "javascript":
-	default:
-		return executionInput{}, unavailable
-	}
-	cases, ok := spec["cases"].([]any)
-	if !ok || len(cases) < 1 || len(cases) > 32 {
-		return executionInput{}, unavailable
-	}
-	for _, value := range cases {
-		testCase, ok := value.(map[string]any)
-		if !ok || !safeObject(testCase) {
-			return executionInput{}, unavailable
-		}
-		if _, ok := testCase["name"].(string); !ok {
-			return executionInput{}, unavailable
-		}
-		if _, ok := testCase["expected"].(string); !ok {
-			return executionInput{}, unavailable
-		}
+	if json.Unmarshal(rawSpec, &spec) != nil {
+		return executionInput{}, invalidGradingSpec()
 	}
 	payload := new(bytes.Buffer)
 	encoder := json.NewEncoder(payload)
@@ -128,67 +104,23 @@ func makeExecutionInput(problemID, version, specVersion, code, mode string, rawS
 		"protocolVersion": 2, "problemId": problemID, "problemVersion": version,
 		"spec": json.RawMessage(rawSpec), "code": code, "mode": mode,
 	})
-	if err != nil || payload.Len() > maxRunnerPayload {
-		return executionInput{}, unavailable
+	if err != nil {
+		return executionInput{}, invalidGradingSpec()
 	}
-	caseCount := len(cases)
+	caseCount := len(spec.Cases)
 	if mode == "example" {
 		caseCount = 1
 	}
-	return executionInput{runtime: runtime, specVersion: specVersion, payload: payload.Bytes(), caseCount: caseCount}, nil
+	return executionInput{runtime: spec.Runtime, specVersion: specVersion, payload: payload.Bytes(), caseCount: caseCount}, nil
 }
 
-func validProblemID(value string) bool {
-	return utf8.ValidString(value) && !strings.ContainsRune(value, 0) && strings.TrimSpace(value) != "" &&
-		len(value) <= 800 && len(utf16.Encode([]rune(value))) <= 200 &&
-		value != "__proto__" && value != "prototype" && value != "constructor"
-}
-
-func safeObject(value map[string]any) bool {
-	if value == nil {
-		return false
-	}
-	for _, key := range []string{"__proto__", "prototype", "constructor"} {
-		if _, exists := value[key]; exists {
-			return false
-		}
-	}
-	return true
-}
-
+// parseExecutionResult reads the grader's JSON output. Unless the grader reports an
+// error, it must return one result per case.
 func parseExecutionResult(data []byte, expectedCases int) (*judgev1.RunResult, error) {
-	invalid := rpcError(connect.CodeFailedPrecondition, "The runner returned an invalid result. Nothing was marked solved.")
-	if len(data) > maxExecutionOutput || !utf8.Valid(data) || expectedCases < 1 || expectedCases > 32 {
-		return nil, invalid
-	}
-	var wire struct {
-		Cases []struct {
-			Name     *string `json:"name"`
-			Input    *string `json:"input"`
-			Expected *string `json:"expected"`
-			Actual   *string `json:"actual"`
-			Passed   *bool   `json:"passed"`
-			Error    *string `json:"error"`
-		} `json:"cases"`
-		Stdout     *string  `json:"stdout"`
-		DurationMS *float64 `json:"durationMs"`
-		Error      *string  `json:"error"`
-	}
-	if json.Unmarshal(data, &wire) != nil || wire.Cases == nil || len(wire.Cases) > 32 ||
-		wire.Stdout == nil || wire.DurationMS == nil || *wire.DurationMS < 0 ||
-		math.IsNaN(*wire.DurationMS) || math.IsInf(*wire.DurationMS, 0) ||
-		((wire.Error == nil || *wire.Error == "") && len(wire.Cases) != expectedCases) {
-		return nil, invalid
-	}
-	result := &judgev1.RunResult{Stdout: *wire.Stdout, DurationMs: *wire.DurationMS, Error: wire.Error}
-	for _, testCase := range wire.Cases {
-		if testCase.Name == nil || testCase.Input == nil {
-			return nil, invalid
-		}
-		result.Cases = append(result.Cases, &judgev1.CaseResult{
-			Name: *testCase.Name, Input: *testCase.Input, Expected: testCase.Expected,
-			Actual: testCase.Actual, Passed: testCase.Passed, Error: testCase.Error,
-		})
+	result := &judgev1.RunResult{}
+	if (protojson.UnmarshalOptions{DiscardUnknown: true}).Unmarshal(data, result) != nil ||
+		(result.GetError() == "" && len(result.Cases) != expectedCases) {
+		return nil, rpcError(connect.CodeFailedPrecondition, "The grader returned an invalid result.")
 	}
 	return result, nil
 }

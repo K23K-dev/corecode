@@ -1,0 +1,12 @@
+# Code generation for judge.proto: npm run judge:generate
+version: v2
+plugins:
+  - local: [go, run, google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.12]
+    out: judge
+    opt: module=github.com/K23K-dev/corecode/judge
+  - local: [go, run, connectrpc.com/connect/cmd/protoc-gen-connect-go@v1.21.0]
+    out: judge
+    opt: [module=github.com/K23K-dev/corecode/judge, simple]
+  - local: protoc-gen-es
+    out: src/server/judge-client/gen
+    opt: target=ts

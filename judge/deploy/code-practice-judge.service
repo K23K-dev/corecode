@@ -1,0 +1,20 @@
+# /etc/systemd/system/code-practice-judge.service
+[Unit]
+Description=Code Practice judge
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+
+[Service]
+User=judge
+SupplementaryGroups=docker
+# POSTGRES_URL and JUDGE_TOKEN; readable only by root.
+EnvironmentFile=/etc/code-practice/judge.env
+ExecStart=/usr/local/bin/code-practice-judge
+Restart=always
+RestartSec=2
+# After SIGTERM the judge drains for up to 30 seconds.
+TimeoutStopSec=40
+
+[Install]
+WantedBy=multi-user.target

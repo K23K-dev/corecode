@@ -61,8 +61,7 @@ const problemMap = <T extends z.ZodType>(value: T) =>
 const ProgressSchema = z
   .strictObject({
     version: z.literal(1),
-    // Each problem's saved entry. The key predates the "problem" naming; it stays because
-    // renaming data already stored in Neon would need a migration.
+    // Each problem's saved entry. Renaming "exercises" would need a migration of stored data.
     exercises: problemMap(ProblemProgressSchema),
   })
   .refine(({ exercises }) => {
@@ -79,11 +78,13 @@ export const ProgressStateSchema = z.object({
 });
 
 const DraftChangeSchema = z.strictObject({ at: Timestamp, value: CodeText });
-/** Unsaved edits: the latest draft, star, and completion choice for each problem. */
-export const ProgressChangesSchema = z.strictObject({
+/**
+ * Unsaved edits: the latest draft and star per problem. Not strict, because an older tab may
+ * still send `solved`; parsing drops it.
+ */
+export const ProgressChangesSchema = z.object({
   drafts: problemMap(DraftChangeSchema),
   stars: problemMap(z.boolean()),
-  solved: problemMap(z.boolean()),
 });
 
 export type Attempt = z.infer<typeof AttemptSchema>;
@@ -91,11 +92,11 @@ export type ProgressData = z.infer<typeof ProgressSchema>;
 export type ProgressState = z.infer<typeof ProgressStateSchema>;
 export type ProgressChanges = z.infer<typeof ProgressChangesSchema>;
 
-export const noChanges = (): ProgressChanges => ({ drafts: {}, stars: {}, solved: {} });
+export const noChanges = (): ProgressChanges => ({ drafts: {}, stars: {} });
 
 /**
- * Drafts keep the newest timestamp, so a late save cannot replace newer code.
- * Stars and checkmarks take the value sent. Edits never touch submission history.
+ * The newest draft wins, so a late save can't replace newer code; stars take the value sent.
+ * Solved flags come only from the judge.
  */
 export function applyProgressChanges(state: ProgressState, changes: ProgressChanges) {
   const exercises = { ...state.progress.exercises };
@@ -107,15 +108,6 @@ export function applyProgressChanges(state: ProgressState, changes: ProgressChan
         draft: draft.value,
         updatedAt: draft.at,
       };
-  }
-  for (const [id, solved] of Object.entries(changes.solved)) {
-    // The browser saves the starter code first; the epoch lets any real draft replace this.
-    const entry = exercises[id] ?? {
-      draft: '',
-      updatedAt: new Date(0).toISOString(),
-      attempts: [],
-    };
-    exercises[id] = { ...entry, solved };
   }
   const stars = new Set(state.stars);
   for (const [id, starred] of Object.entries(changes.stars)) {

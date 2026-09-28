@@ -15,29 +15,16 @@ type ProgressView = {
   status: 'saved' | 'saving' | 'offline';
   warning: string;
 };
-type BackupStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
-type Dependencies = {
-  fetch?: typeof fetch;
-  storage?: BackupStorage | null;
-  now?: () => string;
-  delay?: number;
-};
 
 // A copy of unsaved changes, so closing the tab or a crash before saving loses nothing.
 const BACKUP_KEY = 'coding-practice:unsaved-changes';
+const SAVE_DELAY = 250;
 const RETRY_DELAYS = [1000, 3000, 10000];
 const message = (error: unknown) =>
   error instanceof Error ? error.message : 'The database request failed.';
 
-/**
- * Autosaves drafts, stars, and completion checkmarks. Changes wait in memory and in
- * a browser backup until the server confirms them; the judge owns submission history.
- */
+/** Autosaves drafts and stars. Changes wait in memory and a browser backup until saved. */
 export class ProgressStore {
-  private readonly fetcher: typeof fetch;
-  private readonly storage: BackupStorage | null;
-  private readonly now: () => string;
-  private readonly delay: number;
   /** The latest server state; the view shows pending changes on top of it. */
   private saved!: ProgressState;
   private pending = noChanges();
@@ -50,26 +37,13 @@ export class ProgressStore {
   private failures = 0;
   private disposed = false;
 
-  private constructor(deps: Dependencies) {
-    this.fetcher = deps.fetch ?? fetch;
-    this.now = deps.now ?? (() => new Date().toISOString());
-    this.delay = deps.delay ?? 250;
-    let storage = deps.storage;
-    if (storage === undefined) {
-      try {
-        storage = localStorage;
-      } catch {
-        storage = null;
-      }
-    }
-    this.storage = storage;
-  }
-  static async open(deps: Dependencies = {}): Promise<ProgressStore> {
-    const store = new ProgressStore(deps);
+  private constructor() {}
+  static async open(): Promise<ProgressStore> {
+    const store = new ProgressStore();
     store.saved = await store.readState();
     store.restoreBackup();
     store.publish();
-    if (store.dirty) store.schedule(store.delay);
+    if (store.dirty) store.schedule(SAVE_DELAY);
     return store;
   }
   getSnapshot = (): ProgressView => this.view;
@@ -90,7 +64,6 @@ export class ProgressStore {
   }
   private async readState() {
     const { value } = await requestJson('/api/state', {
-      fetch: this.fetcher,
       failure: 'Your progress could not be loaded.',
     });
     return ProgressStateSchema.parse(value);
@@ -99,7 +72,7 @@ export class ProgressStore {
   /** Resume changes an earlier page left unsaved. An unreadable backup is ignored. */
   private restoreBackup() {
     try {
-      const raw = this.storage?.getItem(BACKUP_KEY);
+      const raw = localStorage.getItem(BACKUP_KEY);
       const backup = raw ? ProgressChangesSchema.safeParse(JSON.parse(raw)) : undefined;
       if (backup?.success) this.pending = backup.data;
       // Rewrite the backup so this tab owns it and can clear it once everything is saved.
@@ -113,11 +86,11 @@ export class ProgressStore {
     try {
       if (this.dirty) {
         const raw = JSON.stringify(this.pending);
-        this.storage?.setItem(BACKUP_KEY, raw);
+        localStorage.setItem(BACKUP_KEY, raw);
         this.backup = raw;
       } else if (this.backup !== null) {
         // Another tab may have replaced the backup with its own unsaved changes.
-        if (this.storage?.getItem(BACKUP_KEY) === this.backup) this.storage.removeItem(BACKUP_KEY);
+        if (localStorage.getItem(BACKUP_KEY) === this.backup) localStorage.removeItem(BACKUP_KEY);
         this.backup = null;
       }
     } catch {
@@ -130,7 +103,7 @@ export class ProgressStore {
     if (previous?.draft === code) return;
     // Stay newer than the draft on screen, even when this device's clock is behind.
     const at = new Date(
-      Math.max(Date.parse(this.now()), Date.parse(previous?.updatedAt ?? '') + 1 || 0),
+      Math.max(Date.now(), Date.parse(previous?.updatedAt ?? '') + 1 || 0),
     ).toISOString();
     this.pending.drafts[id] = { at, value: code };
     this.changed();
@@ -139,18 +112,12 @@ export class ProgressStore {
     this.pending.stars[id] = starred;
     this.changed();
   }
-  setSolved(id: string, solved: boolean, starterCode: string) {
-    // A checkmark needs a saved entry, so start one from the starter code.
-    if (!this.view.progress.exercises[id]) this.setDraft(id, starterCode);
-    this.pending.solved[id] = solved;
-    this.changed();
-  }
   /** Back up and show a new change, then save it shortly. */
   private changed() {
     this.failures = 0;
     this.writeBackup();
     this.publish();
-    this.schedule(this.delay);
+    this.schedule(SAVE_DELAY);
   }
   private schedule(delay: number) {
     clearTimeout(this.timer);
@@ -171,25 +138,23 @@ export class ProgressStore {
     const sent: ProgressChanges = {
       drafts: { ...this.pending.drafts },
       stars: { ...this.pending.stars },
-      solved: { ...this.pending.solved },
     };
     try {
       const { value } = await requestJson('/api/state', {
         method: 'PUT',
         body: sent,
-        fetch: this.fetcher,
         failure: 'Changes are not saved. They remain pending in this browser.',
       });
       const latest = ProgressStateSchema.parse(value);
       if (latest.revision >= this.saved.revision) this.saved = latest;
       // Keep only the changes made while this save was in flight.
-      for (const kind of ['drafts', 'stars', 'solved'] as const)
+      for (const kind of ['drafts', 'stars'] as const)
         for (const [id, change] of Object.entries(sent[kind]))
           if (this.pending[kind][id] === change) delete this.pending[kind][id];
       this.failures = 0;
       this.writeBackup();
       this.publish();
-      if (this.dirty) this.schedule(this.delay);
+      if (this.dirty) this.schedule(SAVE_DELAY);
     } catch (error) {
       this.publish(message(error));
       if (this.failures < RETRY_DELAYS.length) this.schedule(RETRY_DELAYS[this.failures++]);
@@ -204,7 +169,7 @@ export class ProgressStore {
       if (this.disposed) return;
       if (latest.revision >= this.saved.revision) this.saved = latest;
       this.publish();
-      if (this.dirty) this.schedule(this.delay);
+      if (this.dirty) this.schedule(SAVE_DELAY);
     } catch (error) {
       if (!this.disposed) this.publish(message(error));
     }

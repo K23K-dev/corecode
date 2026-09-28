@@ -1,4 +1,4 @@
-"""Grades Python, SQL, and shell submissions. Run only inside the restricted practice container."""
+"""Grades Python and SQL submissions. Run only inside the restricted practice container."""
 import ast
 import contextlib
 import copy
@@ -11,30 +11,6 @@ import time
 import types
 
 MAX_REQUEST_BYTES = 1024 * 1024
-
-
-def _request_spec(job):
-    """Protocol v2 receives its trusted grading specification from the server."""
-    if job.get('protocolVersion') != 2:
-        raise ValueError('Runner protocol version 2 is required.')
-    spec = job['spec']
-    runtime = spec.get('runtime')
-    if runtime not in ('python', 'sql', 'shell'):
-        raise ValueError('A trusted native grading specification is required.')
-    for case in spec['cases']:
-        if runtime == 'python':
-            if 'code' in case:
-                valid = isinstance(case['code'], str)
-            else:
-                valid = (isinstance(case.get('args'), str)
-                         and isinstance(case.get('entryPoint'), str))
-        elif runtime == 'sql':
-            valid = isinstance(case.get('setup'), str) and isinstance(case.get('rows'), list)
-        else:
-            valid = isinstance(case.get('verify'), str)
-        if not valid:
-            raise ValueError('The grading specification contains an incomplete case.')
-    return spec
 
 
 class BoundedOutput(io.StringIO):
@@ -194,9 +170,13 @@ def grade_sql_case(code, case):
 
 def grade_submission(job):
     started = time.perf_counter()
-    spec = _request_spec(job)
+    # The spec is trusted: the judge loads it from the database.
+    if job.get('protocolVersion') != 2:
+        raise ValueError('Runner protocol version 2 is required.')
+    spec = job['spec']
     code = job['code']
-    scientific = spec.get('scientific') or job['problemId'].startswith(('numpy-', 'pandas-', 'ml-', 'dl-', 'llm-'))
+    # The NumPy, pandas, ML, deep-learning, and LLM decks get the array, frame, and tensor helpers.
+    scientific = job['problemId'].startswith(('numpy-', 'pandas-', 'ml-', 'dl-', 'llm-'))
     cases = spec['cases'] if job['mode'] == 'submit' else spec['cases'][:1]
     output = BoundedOutput()
     results = []
@@ -207,9 +187,6 @@ def grade_submission(job):
             with contextlib.redirect_stdout(output), contextlib.redirect_stderr(output):
                 if spec['runtime'] == 'sql':
                     result['actual'] = grade_sql_case(code, case)
-                elif spec['runtime'] == 'shell':
-                    from shell_grader import grade_shell_case
-                    result['actual'] = grade_shell_case(code, case)
                 else:
                     result['actual'] = grade_python_case(code, case, scientific)
             result['passed'] = True

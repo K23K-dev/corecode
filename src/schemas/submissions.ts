@@ -14,7 +14,6 @@ export const ExecutionRequest = z.discriminatedUnion('mode', [
 export const PendingSubmissionSchema = z.object({
   ...input,
   submissionId: JobID,
-  cancelRequested: z.boolean(),
   createdAt: z.number().nonnegative(),
 });
 const CaseResultSchema = z.object({
@@ -31,20 +30,14 @@ export const RunResultSchema = z.object({
   durationMs: z.number().nonnegative(),
   error: z.string().optional(),
 });
-const JobTimestamp = z.iso.datetime();
 export const JobSnapshotSchema = z.object({
   jobId: JobID,
   problemId: Identifier,
-  problemVersion: ProblemVersion,
   state: z.enum(['queued', 'running', 'canceling', 'completed', 'failed', 'canceled']),
-  createdAt: JobTimestamp,
-  startedAt: JobTimestamp.optional(),
-  finishedAt: JobTimestamp.optional(),
   result: RunResultSchema.optional(),
   error: z.string().optional(),
   revision: z.string().regex(/^\d+$/),
 });
-export type CaseResult = z.infer<typeof CaseResultSchema>;
 export type RunResult = z.infer<typeof RunResultSchema>;
 export type JobSnapshot = z.infer<typeof JobSnapshotSchema>;
 export type PendingSubmission = z.infer<typeof PendingSubmissionSchema>;

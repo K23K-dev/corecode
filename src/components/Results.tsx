@@ -71,7 +71,7 @@ export default function Results({
       <EmptyState
         icon={<Terminal size={25} />}
         title="Try your solution"
-        description="Run the example to check your approach. Submit to check the full set of cases."
+        description="Run checks the first example; Submit checks every case."
       />
     );
   const staleNotice = stale && (

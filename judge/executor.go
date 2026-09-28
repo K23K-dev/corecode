@@ -22,8 +22,7 @@ const maxExecutionOutput = 512000
 
 var errOutputLimit = errors.New("Execution output exceeded 512 KB.")
 
-// Every grading container carries this label, so a new judge process can remove
-// containers that an earlier process on this Docker engine left behind.
+// Every grading container carries this label, so the next judge start can remove leftovers.
 const judgeLabel = "code-practice.judge"
 
 // One executor owns two execution slots shared by temporary runs and queued submissions.
@@ -40,12 +39,12 @@ type executor struct {
 
 func newExecutor(ctx context.Context, docker *client.Client, cfg config) *executor {
 	return &executor{ctx: ctx, docker: docker, images: map[string]string{
-		"python": cfg.pythonImage, "sql": cfg.pythonImage, "shell": cfg.pythonImage, "javascript": cfg.javascriptImage,
+		"python": cfg.pythonImage, "sql": cfg.pythonImage, "javascript": cfg.javascriptImage,
 	}}
 }
 
-// prepare waits until Docker and both grader images are available, then removes
-// containers left by an earlier judge process. It returns false if the judge stops first.
+// prepare waits for Docker and both grader images, then removes leftover containers.
+// It returns false if the judge stops first.
 func (e *executor) prepare(ctx context.Context) bool {
 	for waiting := false; ; waiting = true {
 		if err := e.removeLeftovers(ctx); err == nil {
@@ -200,8 +199,7 @@ func (e *executor) run(ctx context.Context, input executionInput) (*judgev1.RunR
 		}
 		sent <- sendErr
 	}()
-	// The SDK's result channel is unbuffered. Always receive it, even if the RPC
-	// is canceled first, so its wait goroutine cannot remain blocked on delivery.
+	// Always receive the SDK's unbuffered wait result, even after a cancel, or its goroutine leaks.
 	wait := e.docker.ContainerWait(runCtx, created.ID, client.ContainerWaitOptions{Condition: container.WaitConditionNotRunning})
 	type exit struct {
 		response container.WaitResponse
@@ -282,7 +280,6 @@ func executionContainer(image, name string, command []string) client.ContainerCr
 			Tmpfs: map[string]string{
 				"/work": "rw,nosuid,size=256m,mode=1777",
 				"/tmp":  "rw,nosuid,size=128m,mode=1777",
-				"/srv":  "rw,noexec,nosuid,size=4m,mode=1777",
 			},
 		},
 	}

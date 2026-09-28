@@ -6,12 +6,10 @@ import { ProblemListProvider } from '../hooks/useProblemList';
 import { theme } from '../lib/theme';
 import '@mantine/core/styles.css';
 import '@mantine/dates/styles.css';
-import './globals.css';
 
 export const metadata: Metadata = {
   title: 'Code Practice',
   description: 'A personal coding workbench for short, focused practice.',
-  icons: { icon: '/icon.png' },
 };
 
 export const viewport: Viewport = { themeColor: '#242424' };

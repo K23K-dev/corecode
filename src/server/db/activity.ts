@@ -4,11 +4,10 @@ import { Timestamp } from '../../schemas/progress';
 
 /** Accepted-submission times from the full archive, without fetching learner code. */
 export async function readActivity(pool: Pool): Promise<ActivityHistory> {
-  const { rows } = await pool.query<{ at: string | null }>(`SELECT attempt->>'at' AS at
+  const { rows } = await pool.query<{ at: string | null }>(`
+    SELECT attempt->>'at' AS at
     FROM cp_submissions
-    WHERE attempt->>'status' = 'accepted'
-      AND jsonb_typeof(attempt->'passed') = 'number' AND jsonb_typeof(attempt->'total') = 'number'
-      AND attempt->'passed' = attempt->'total' AND attempt->'total' > '0'::jsonb`);
+    WHERE attempt->>'status' = 'accepted'`);
   const now = Date.now();
   // Imported history may hold malformed or future timestamps; skip those.
   const accepted = rows.flatMap(({ at }) => {

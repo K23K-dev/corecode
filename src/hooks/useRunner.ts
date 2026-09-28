@@ -23,15 +23,9 @@ export function useRunner(
   const [notice, setNotice] = useState('');
   const runner = useRef<Runner | null>(null);
   const request = useRef(0);
-  const cancellationNotice = useRef('');
 
   const showJob = useCallback((job: JobSnapshot, ticket: number, submittedCode?: string) => {
     if (ticket !== request.current) return;
-    if (!['queued', 'running'].includes(job.state)) {
-      const previous = cancellationNotice.current;
-      setNotice((current) => (current === previous ? '' : current));
-      cancellationNotice.current = '';
-    }
     setRecovering(false);
     setRunning(['queued', 'running', 'canceling'].includes(job.state));
     setConsoleOpen(true);
@@ -163,24 +157,17 @@ export function useRunner(
       if (!job) {
         ++request.current;
         setRunning(false);
-        setExecution({ mode: 'example', error: 'Run canceled. Your code is still in the editor.' });
+        setExecution((current) => ({
+          mode: current?.mode ?? 'example',
+          error: 'Stopped. Your code is still in the editor.',
+        }));
       }
     } catch (error) {
-      if (ticket === request.current) {
-        cancellationNotice.current =
-          error instanceof Error ? error.message : 'Cancellation could not be confirmed.';
-        setNotice(cancellationNotice.current);
-      }
+      if (ticket === request.current)
+        setNotice(error instanceof Error ? error.message : 'Stop could not be confirmed.');
     } finally {
       setStopping(false);
     }
-  }
-
-  /** Stop watching before navigating away; a durable submission keeps running. */
-  function leave() {
-    ++request.current;
-    runner.current?.detach();
-    setRunning(false);
   }
 
   function clearResult() {
@@ -198,7 +185,6 @@ export function useRunner(
     setConsoleOpen,
     execute,
     cancel,
-    leave,
     clearResult,
   };
 }

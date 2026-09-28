@@ -2,6 +2,6 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
   "functions": {
-    "src/app/api/**/*": { "supportsCancellation": true, "maxDuration": 300 }
+    "src/app/api/**/*": { "supportsCancellation": true, "maxDuration": 60 }
   }
 }

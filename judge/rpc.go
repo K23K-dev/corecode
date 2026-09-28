@@ -11,26 +11,19 @@ import (
 	"time"
 
 	"connectrpc.com/connect"
-	"connectrpc.com/grpchealth"
 	judgev1 "github.com/K23K-dev/corecode/judge/gen"
 	"github.com/K23K-dev/corecode/judge/gen/judgev1connect"
 )
 
 const maxMessageBytes = 1 << 20
 
-// newHandler serves the judge and the standard gRPC health service to gRPC,
-// gRPC-Web, and Connect clients. Every call, including health, must carry the
-// shared token; Sandbox sessions also count calls toward the idle timer.
-func newHandler(token string, judge judgev1connect.JudgeServiceHandler, health grpchealth.Checker, lifecycle *judgeLifecycle) http.Handler {
+// newHandler serves the judge to gRPC, gRPC-Web, and Connect clients. Every call must carry the
+// shared token.
+func newHandler(token string, judge judgev1connect.JudgeServiceHandler) http.Handler {
 	limits := []connect.HandlerOption{connect.WithReadMaxBytes(maxMessageBytes), connect.WithSendMaxBytes(maxMessageBytes)}
 	mux := http.NewServeMux()
 	mux.Handle(judgev1connect.NewJudgeServiceHandler(judge, limits...))
-	mux.Handle(grpchealth.NewHandler(health, limits...))
-	var handler http.Handler = mux
-	if lifecycle != nil {
-		handler = lifecycle.track(handler)
-	}
-	return http.MaxBytesHandler(authenticate(token, handler), maxMessageBytes+1024)
+	return http.MaxBytesHandler(authenticate(token, mux), maxMessageBytes+1024)
 }
 
 // TLS terminates at the hosting proxy, so the token is checked here. The browser never gets it.
@@ -90,8 +83,6 @@ func (s *judgeServer) Submit(ctx context.Context, request *judgev1.SubmitRequest
 	request.SubmissionId = id
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
-	s.queue.admission.Lock()
-	defer s.queue.admission.Unlock()
 	// An acknowledged UUID remains usable when the catalog or runtime changes.
 	existing, err := s.queue.store.find(ctx, id)
 	if err != nil {
@@ -135,24 +126,6 @@ func (s *judgeServer) GetJob(ctx context.Context, request *judgev1.JobRequest) (
 		return nil, rpcError(connect.CodeNotFound, "Job not found.")
 	}
 	return job.snapshot, nil
-}
-
-// Preserve the RPC name while narrowing it to the website's recovery lookup.
-func (s *judgeServer) ListJobs(ctx context.Context, request *judgev1.ListJobsRequest) (*judgev1.ListJobsResponse, error) {
-	if !validProblemID(request.GetProblemId()) {
-		return nil, rpcError(connect.CodeInvalidArgument, "Invalid problem ID.")
-	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	job, err := s.queue.store.latest(ctx, request.GetProblemId())
-	if err != nil {
-		return nil, err
-	}
-	response := &judgev1.ListJobsResponse{}
-	if job != nil {
-		response.Jobs = []*judgev1.JobSnapshot{job}
-	}
-	return response, nil
 }
 
 func (s *judgeServer) CancelJob(ctx context.Context, request *judgev1.JobRequest) (*judgev1.JobSnapshot, error) {

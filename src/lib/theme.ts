@@ -6,9 +6,10 @@ export const theme: MantineThemeOverride = {
   fontFamilyMonospace: "Consolas, 'Cascadia Code', monospace",
 };
 
-/** The Mantine color for each difficulty. */
+/** The Mantine color for each difficulty, easiest first. */
 export const DIFFICULTY_COLORS: Record<string, string> = {
   Easy: 'teal',
   Medium: 'yellow',
   Hard: 'red',
 };
+export const DIFFICULTIES = Object.keys(DIFFICULTY_COLORS);

@@ -7,9 +7,9 @@ RUN printf 'Acquire::ForceIPv4 "true";\n' > /etc/apt/apt.conf.d/99force-ipv4 \
 RUN apt-get update && apt-get install -y --no-install-recommends chromium ca-certificates fonts-liberation coreutils \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /opt/runner
-COPY judge/graders/javascript/package.json ./package.json
+COPY package.json ./
 RUN npm install --omit=dev --ignore-scripts && npm cache clean --force
-COPY judge/graders/javascript/ ./
+COPY *.mjs ./
 ENV HOME=/work TMPDIR=/work
 USER node
 WORKDIR /work

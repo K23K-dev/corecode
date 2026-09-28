@@ -5,40 +5,53 @@ import { Button, Group, NativeSelect, Paper, Text, Title } from '@mantine/core';
 import { RotateCcw } from 'lucide-react';
 import type { Problem } from '../schemas/catalog';
 
-/** A standalone page that renders the authored solution and reports its height. */
-function previewDocument(problem: Problem): string {
+/**
+ * Runs inside the preview page, which gets this function's source as text. So it can only use
+ * browser globals, never anything else from this file.
+ */
+function previewScript(assets: Record<string, string>) {
+  // Links and forms stay on the preview page.
+  document.addEventListener(
+    'click',
+    (event) => {
+      if (event.target instanceof Element && event.target.closest('a')) event.preventDefault();
+    },
+    true,
+  );
+  document.addEventListener('submit', (event) => event.preventDefault(), true);
+  // Swap image file names for the problem's bundled images.
+  for (const image of document.images) {
+    const source = image.getAttribute('src') ?? '';
+    if (Object.hasOwn(assets, source)) image.src = assets[source];
+  }
+  // Report the page's height, so the preview frame can fit it.
+  new ResizeObserver(() => {
+    parent.postMessage({ previewHeight: document.documentElement.offsetHeight }, '*');
+  }).observe(document.documentElement);
+}
+
+// Authored text must not end the <style> or <script> element early.
+const escapeEndTags = (text: string) => text.replaceAll('</', '<\\/');
+
+/** The preview page: the problem's target HTML and CSS, with the script above. */
+function previewDocument(problem: Problem) {
   const preview = problem.preview!;
-  const assets = JSON.stringify(preview.assets ?? {});
   const css = `html, body { margin: 0; }\n${preview.css ?? ''}\n${problem.extension === 'css' ? problem.referenceCode : ''}`;
-  const body = problem.extension === 'html' ? problem.referenceCode : (preview.html ?? '');
+  const html = problem.extension === 'html' ? problem.referenceCode : (preview.html ?? '');
+  // JavaScript problems run the reference solution, then the preview's setup code.
   const solution =
     problem.extension === 'js'
       ? `${problem.referenceCode}\nconst candidate = ${problem.entryPoint};\n${preview.setup ?? 'candidate();'}`
       : '';
-  const script = `
-    document.addEventListener('click', (event) => {
-      if (event.target instanceof Element && event.target.closest('a')) event.preventDefault();
-    }, true);
-    document.addEventListener('submit', (event) => event.preventDefault(), true);
-    const assets = ${assets};
-    const replaceImages = () => {
-      for (const image of document.querySelectorAll('img[src]')) {
-        const source = image.getAttribute('src');
-        if (Object.hasOwn(assets, source) && source !== assets[source]) image.src = assets[source];
-      }
-    };
-    new MutationObserver(replaceImages).observe(document.documentElement, {
-      childList: true, subtree: true, attributes: true, attributeFilter: ['src'],
-    });
-    replaceImages();
-    new ResizeObserver(() => {
-      // The layout height, not the viewport, so short pages can shrink the frame.
-      parent.postMessage({ previewHeight: document.documentElement.offsetHeight }, '*');
-    }).observe(document.documentElement);
-    ${solution}`;
-  // Keep authored text from closing the style or script element early.
-  const safe = (text: string) => text.replace(/<\//g, '<\\/');
-  return `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><style>${safe(css)}</style></head><body>${body}<script type="module">${safe(script)}</script></body></html>`;
+  const script = `(${previewScript})(${JSON.stringify(preview.assets ?? {})});\n${solution}`;
+  return `<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width,initial-scale=1">
+    <style>${escapeEndTags(css)}</style>
+  </head>
+  <body>${html}<script type="module">${escapeEndTags(script)}</script></body></html>`;
 }
 
 /** Displays the authored target, never the learner's editor contents. */
@@ -115,12 +128,12 @@ export default function FrontendPreview({ problem }: { problem: Problem }) {
           <div
             style={{ width: viewportWidth * scale, height: height * scale, marginInline: 'auto' }}
           >
-            {/* Scripts run in an opaque origin: no access to this page, cookies, or storage. */}
+            {/* Runs in an opaque origin: no access to this page, cookies, or storage. */}
             <iframe
               key={reset}
               ref={frame}
               title="Target preview"
-              sandbox="allow-scripts"
+              sandbox="allow-scripts allow-forms"
               srcDoc={previewDocument(problem)}
               style={{
                 width: viewportWidth,
