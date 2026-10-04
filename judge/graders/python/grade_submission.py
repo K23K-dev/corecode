@@ -10,8 +10,6 @@ import sys
 import time
 import types
 
-MAX_REQUEST_BYTES = 1024 * 1024
-
 
 class BoundedOutput(io.StringIO):
     def write(self, value):
@@ -171,8 +169,6 @@ def grade_sql_case(code, case):
 def grade_submission(job):
     started = time.perf_counter()
     # The spec is trusted: the judge loads it from the database.
-    if job.get('protocolVersion') != 2:
-        raise ValueError('Runner protocol version 2 is required.')
     spec = job['spec']
     code = job['code']
     # The NumPy, pandas, ML, deep-learning, and LLM decks get the array, frame, and tensor helpers.
@@ -199,11 +195,7 @@ def grade_submission(job):
 
 if __name__ == '__main__':
     try:
-        payload = sys.stdin.buffer.read(MAX_REQUEST_BYTES + 1)
-        if len(payload) > MAX_REQUEST_BYTES:
-            raise ValueError('Request exceeds the 1 MiB limit.')
-        job = json.loads(payload.decode('utf-8'))
-        result = grade_submission(job)
+        result = grade_submission(json.load(sys.stdin.buffer))
     except BaseException as error:
         result = {'cases': [], 'stdout': '', 'durationMs': 0, 'error': f'{type(error).__name__}: {error}'[:4000]}
     print(json.dumps(result, allow_nan=False))

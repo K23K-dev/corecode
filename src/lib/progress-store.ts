@@ -1,7 +1,6 @@
 import {
   applyProgressChanges,
   noChanges,
-  ProgressChangesSchema,
   ProgressStateSchema,
   type ProgressChanges,
   type ProgressData,
@@ -16,20 +15,16 @@ type ProgressView = {
   warning: string;
 };
 
-// A copy of unsaved changes, so closing the tab or a crash before saving loses nothing.
-const BACKUP_KEY = 'coding-practice:unsaved-changes';
 const SAVE_DELAY = 250;
 const RETRY_DELAYS = [1000, 3000, 10000];
 const message = (error: unknown) =>
   error instanceof Error ? error.message : 'The database request failed.';
 
-/** Autosaves drafts and stars. Changes wait in memory and a browser backup until saved. */
+// Autosaves drafts and stars. Changes wait in memory until the server confirms them.
 export class ProgressStore {
-  /** The latest server state; the view shows pending changes on top of it. */
+  // The latest server state; the view shows pending changes on top of it.
   private saved!: ProgressState;
   private pending = noChanges();
-  /** What this tab last wrote to the backup key. */
-  private backup: string | null = null;
   private view!: ProgressView;
   private listeners = new Set<() => void>();
   private timer: ReturnType<typeof setTimeout> | undefined;
@@ -41,9 +36,7 @@ export class ProgressStore {
   static async open(): Promise<ProgressStore> {
     const store = new ProgressStore();
     store.saved = await store.readState();
-    store.restoreBackup();
     store.publish();
-    if (store.dirty) store.schedule(SAVE_DELAY);
     return store;
   }
   getSnapshot = (): ProgressView => this.view;
@@ -69,35 +62,6 @@ export class ProgressStore {
     return ProgressStateSchema.parse(value);
   }
 
-  /** Resume changes an earlier page left unsaved. An unreadable backup is ignored. */
-  private restoreBackup() {
-    try {
-      const raw = localStorage.getItem(BACKUP_KEY);
-      const backup = raw ? ProgressChangesSchema.safeParse(JSON.parse(raw)) : undefined;
-      if (backup?.success) this.pending = backup.data;
-      // Rewrite the backup so this tab owns it and can clear it once everything is saved.
-      this.writeBackup();
-    } catch {
-      // Storage can be unavailable; the saved server copy still loads.
-    }
-  }
-  /** Mirror unsaved changes to the backup, and clear it once everything is saved. */
-  private writeBackup() {
-    try {
-      if (this.dirty) {
-        const raw = JSON.stringify(this.pending);
-        localStorage.setItem(BACKUP_KEY, raw);
-        this.backup = raw;
-      } else if (this.backup !== null) {
-        // Another tab may have replaced the backup with its own unsaved changes.
-        if (localStorage.getItem(BACKUP_KEY) === this.backup) localStorage.removeItem(BACKUP_KEY);
-        this.backup = null;
-      }
-    } catch {
-      // Storage can be full or disabled; changes still save from memory.
-    }
-  }
-
   setDraft(id: string, code: string) {
     const previous = this.view.progress.exercises[id];
     if (previous?.draft === code) return;
@@ -112,10 +76,9 @@ export class ProgressStore {
     this.pending.stars[id] = starred;
     this.changed();
   }
-  /** Back up and show a new change, then save it shortly. */
+  // Show a new change right away, then save it shortly.
   private changed() {
     this.failures = 0;
-    this.writeBackup();
     this.publish();
     this.schedule(SAVE_DELAY);
   }
@@ -124,7 +87,7 @@ export class ProgressStore {
     if (!this.disposed) this.timer = setTimeout(() => void this.flush(), delay);
   }
 
-  /** Save pending changes now. One save runs at a time; later edits wait for the next. */
+  // Save pending changes now. One save runs at a time; later edits wait for the next.
   flush(): Promise<void> {
     clearTimeout(this.timer);
     if (this.saving) return this.saving;
@@ -143,7 +106,7 @@ export class ProgressStore {
       const { value } = await requestJson('/api/state', {
         method: 'PUT',
         body: sent,
-        failure: 'Changes are not saved. They remain pending in this browser.',
+        failure: 'Changes are not saved yet. Keep this tab open while it retries.',
       });
       const latest = ProgressStateSchema.parse(value);
       if (latest.revision >= this.saved.revision) this.saved = latest;
@@ -152,7 +115,6 @@ export class ProgressStore {
         for (const [id, change] of Object.entries(sent[kind]))
           if (this.pending[kind][id] === change) delete this.pending[kind][id];
       this.failures = 0;
-      this.writeBackup();
       this.publish();
       if (this.dirty) this.schedule(SAVE_DELAY);
     } catch (error) {
@@ -161,7 +123,7 @@ export class ProgressStore {
     }
   }
 
-  /** Load the latest server state, then retry anything still unsaved. */
+  // Load the latest server state, then retry anything still unsaved.
   async refresh(): Promise<void> {
     if (this.disposed) return;
     try {

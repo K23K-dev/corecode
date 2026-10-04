@@ -11,37 +11,12 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-type config struct {
-	database        *pgxpool.Config
-	pythonImage     string
-	javascriptImage string
-}
-
-func loadConfig() (config, error) {
-	database, err := databaseConfig(os.Getenv("POSTGRES_URL"))
-	if err != nil {
-		return config{}, err
-	}
-	return config{
-		database:        database,
-		pythonImage:     configuredValue("JUDGE_PYTHON_IMAGE", "cp-practice-python:3"),
-		javascriptImage: configuredValue("JUDGE_JAVASCRIPT_IMAGE", "coding-practice-js:4"),
-	}, nil
-}
-
 func judgeToken() (string, error) {
 	token := os.Getenv("JUDGE_TOKEN")
 	if len(token) < 32 {
 		return "", errors.New("JUDGE_TOKEN must be at least 32 characters.")
 	}
 	return token, nil
-}
-
-func configuredValue(name, fallback string) string {
-	if value := strings.TrimSpace(os.Getenv(name)); value != "" {
-		return value
-	}
-	return fallback
 }
 
 func databaseConfig(value string) (*pgxpool.Config, error) {

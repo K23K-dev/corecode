@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import {
   Badge,
   Code,
@@ -25,8 +26,7 @@ type ProblemPanelProps = {
   problem: Problem;
   solved: boolean;
   attempts: Attempt[];
-  tab: ProblemTab;
-  onTabChange: (tab: ProblemTab) => void;
+  initialTab: ProblemTab;
   onViewAttempt: (attempt: Attempt) => void;
 };
 
@@ -36,14 +36,14 @@ export default function ProblemPanel({
   problem,
   solved,
   attempts,
-  tab,
-  onTabChange,
+  initialTab,
   onViewAttempt,
 }: ProblemPanelProps) {
+  const [tab, setTab] = useState(initialTab);
   return (
     <Tabs
       value={tab}
-      onChange={(value) => value && onTabChange(value as ProblemTab)}
+      onChange={(value) => value && setTab(value as ProblemTab)}
       keepMounted={false}
       aria-label="Problem description"
       flex={1}

@@ -8,7 +8,7 @@ import { errorResponse, jsonBody, RequestError } from './middleware';
 
 let services: ApiEnv['Variables']['services'] | undefined;
 
-/** Reads the configuration once per warm function. Its messages never include secrets. */
+// Reads the configuration once per warm function. Its messages never include secrets.
 function loadServices() {
   try {
     return (services ??= loadConfig(process.env));
@@ -25,7 +25,7 @@ function loadServices() {
   }
 }
 
-/** Every API endpoint, and what runs before each one. */
+// Every API endpoint, and what runs before each one.
 export const router = new Hono<ApiEnv>().basePath('/api');
 
 // Before every endpoint: keep the response out of caches, load configuration, check the

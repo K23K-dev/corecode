@@ -1,15 +1,16 @@
+import { Console } from 'node:console';
 import { writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
+import { Writable } from 'node:stream';
+import { json } from 'node:stream/consumers';
 import { pathToFileURL } from 'node:url';
-import { inspect } from 'node:util';
 import { build } from 'esbuild';
 import { chromium } from 'playwright';
 import { gradeFrontendCase, createFrontendFixture } from './frontend-grader.mjs';
 import { gradeBackendCase } from './backend-grader.mjs';
 
 const require = createRequire(import.meta.url);
-const MAX_REQUEST = 1024 * 1024,
-  MAX_OUTPUT = 16 * 1024;
+const MAX_OUTPUT = 16 * 1024;
 const bounded = (value, limit = 4000) => String(value).slice(0, limit);
 const errorText = (error) => bounded(error?.message ?? error);
 const fixtureExports = {
@@ -84,49 +85,35 @@ async function compile(code, spec, backend) {
   return result.outputFiles[0].text;
 }
 
-/** Compiles and grades one frontend or backend submission in a fresh Docker sandbox. */
-export async function gradeSubmission(request) {
+// Compiles and grades one frontend or backend submission in a fresh Docker sandbox.
+async function gradeSubmission(request) {
   const started = performance.now();
   let stdout = '',
-    browser;
-  const originalConsole = Object.fromEntries(
-    ['log', 'info', 'warn', 'error', 'debug'].map((key) => [key, console[key]]),
-  );
+    browser,
+    failure;
   const append = (text) => {
-    if (stdout.length < MAX_OUTPUT) stdout += bounded(text, MAX_OUTPUT - stdout.length) + '\n';
+    if (stdout.length < MAX_OUTPUT) stdout += bounded(text, MAX_OUTPUT - stdout.length);
   };
-  for (const key of Object.keys(originalConsole))
-    console[key] = (...values) =>
-      append(
-        values
-          .map((value) =>
-            typeof value === 'string' ? value : inspect(value, { depth: 3, maxArrayLength: 30 }),
-          )
-          .join(' '),
-      );
+  // Every console method prints into the result's stdout, never onto the real one with the JSON.
+  const capture = new Writable({
+    write(chunk, _encoding, done) {
+      append(String(chunk));
+      done();
+    },
+  });
+  globalThis.console = new Console({ stdout: capture });
   const results = [];
   try {
     // The spec is trusted: the judge loads it from the database.
-    if (request?.protocolVersion !== 2) throw new Error('Runner protocol version 2 is required.');
     const spec = request.spec;
     const backend = request.problemId.startsWith('backend-');
     const mode = request.mode;
     const tests = mode === 'example' ? spec.cases.slice(0, 1) : spec.cases;
     const compiled = await compile(request.code, spec, backend);
+    // Playwright's defaults already run headless, without Chromium's own sandbox (the container
+    // is the boundary), and without background networking or updates.
     if (!backend)
-      browser = await chromium.launch({
-        executablePath: '/usr/bin/chromium',
-        headless: true,
-        chromiumSandbox: false,
-        args: [
-          '--no-sandbox',
-          '--disable-dev-shm-usage',
-          '--disable-background-networking',
-          '--disable-component-update',
-          '--no-first-run',
-        ],
-        timeout: 5000,
-      });
+      browser = await chromium.launch({ executablePath: '/usr/bin/chromium', timeout: 5000 });
     for (let index = 0; index < tests.length; index++) {
       const test = tests[index];
       const result = {
@@ -152,7 +139,7 @@ export async function gradeSubmission(request) {
           });
           await context.route('**/*', (route) => route.abort());
           const page = await context.newPage();
-          page.on('console', (entry) => append(entry.text()));
+          page.on('console', (entry) => append(entry.text() + '\n'));
           page.setDefaultTimeout(1800);
           try {
             const html =
@@ -186,42 +173,25 @@ export async function gradeSubmission(request) {
       if (typeof result.actual === 'string') result.actual = bounded(result.actual);
       results.push(result);
     }
-    return {
-      cases: results,
-      stdout: bounded(stdout, MAX_OUTPUT),
-      durationMs: Math.round(performance.now() - started),
-    };
   } catch (error) {
-    return {
-      cases: results,
-      stdout: bounded(stdout, MAX_OUTPUT),
-      durationMs: Math.round(performance.now() - started),
-      error: errorText(error),
-    };
+    failure = errorText(error);
   } finally {
     if (browser) await browser.close().catch(() => {});
-    Object.assign(console, originalConsole);
   }
+  return {
+    cases: results,
+    stdout: bounded(stdout, MAX_OUTPUT),
+    durationMs: Math.round(performance.now() - started),
+    ...(failure !== undefined && { error: failure }),
+  };
 }
 
-if (process.argv[1] === new URL(import.meta.url).pathname) {
-  let bytes = 0,
-    chunks = [];
-  try {
-    for await (const chunk of process.stdin) {
-      bytes += chunk.length;
-      if (bytes > MAX_REQUEST) throw new Error('Request exceeds the 1 MiB limit.');
-      chunks.push(chunk);
-    }
-    const request = JSON.parse(
-      new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks)),
-    );
-    const result = await gradeSubmission(request);
-    process.stdout.write(JSON.stringify(result));
-  } catch (error) {
-    process.stdout.write(
-      JSON.stringify({ cases: [], stdout: '', durationMs: 0, error: errorText(error) }),
-    );
-  }
-  process.exit(0);
+// The judge sends one JSON request on stdin; the result goes to stdout.
+let result;
+try {
+  result = await gradeSubmission(await json(process.stdin));
+} catch (error) {
+  result = { cases: [], stdout: '', durationMs: 0, error: errorText(error) };
 }
+process.stdout.write(JSON.stringify(result));
+process.exit(0);

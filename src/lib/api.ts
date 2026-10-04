@@ -1,4 +1,4 @@
-/** An error response from the practice API, with its HTTP status and error code. */
+// An error response from the practice API, with its HTTP status and error code.
 export class ApiError extends Error {
   constructor(
     message: string,

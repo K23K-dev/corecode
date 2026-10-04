@@ -29,7 +29,6 @@ import {
   RotateCcw,
   Square,
 } from 'lucide-react';
-import type { ProgressStore } from '../../../lib/progress-store';
 import type { Problem } from '../../../schemas/catalog';
 import type { Attempt } from '../../../schemas/progress';
 import { ProgressWarning, useAppData } from '../../../components/AppProvider';
@@ -42,7 +41,7 @@ const CodeEditor = dynamic(() => import('../../../components/CodeEditor'), { ssr
 const ProblemPanel = dynamic(() => import('../../../components/ProblemPanel'));
 const BORDER = '1px solid var(--mantine-color-dark-4)';
 
-/** "/problems/[id]": the problem, its code editor, and Run/Submit results. */
+// "/problems/[id]": the problem, its code editor, and Run/Submit results.
 export default function ProblemPage({
   params,
   searchParams,
@@ -52,7 +51,7 @@ export default function ProblemPage({
 }) {
   const { id } = use(params);
   const initialTab = use(searchParams).tab === 'solution' ? 'solution' : 'question';
-  const { catalog, store } = useAppData();
+  const { catalog } = useAppData();
   const problem = catalog.problems.find((item) => item.id === id);
   if (!problem)
     return (
@@ -67,31 +66,14 @@ export default function ProblemPage({
         </EmptyState>
       </main>
     );
-  return (
-    <ProblemView
-      key={problem.id}
-      problems={catalog.problems}
-      store={store}
-      problem={problem}
-      initialTab={initialTab}
-    />
-  );
+  return <ProblemView key={problem.id} problem={problem} initialTab={initialTab} />;
 }
 
-function ProblemView({
-  problems,
-  store,
-  problem,
-  initialTab,
-}: {
-  problems: Problem[];
-  store: ProgressStore;
-  problem: Problem;
-  initialTab: 'question' | 'solution';
-}) {
+function ProblemView({ problem, initialTab }: { problem: Problem; initialTab: ProblemTab }) {
   const router = useRouter();
+  const { catalog, store } = useAppData();
+  const problems = catalog.problems;
   const { progress: data } = useSyncExternalStore(store.subscribe, store.getSnapshot);
-  const [leftTab, setLeftTab] = useState<ProblemTab>(initialTab);
   const [showReset, setShowReset] = useState(false);
   const [mobilePane, setMobilePane] = useState('problem');
   const [viewAttempt, setViewAttempt] = useState<Attempt | null>(null);
@@ -188,8 +170,7 @@ function ProblemView({
             problem={problem}
             solved={Boolean(data.exercises[problem.id]?.solved)}
             attempts={attempts}
-            tab={leftTab}
-            onTabChange={setLeftTab}
+            initialTab={initialTab}
             onViewAttempt={setViewAttempt}
           />
         </Box>
@@ -217,7 +198,6 @@ function ProblemView({
           </Group>
           <Box flex={1} mih={80}>
             <CodeEditor
-              key={problem.id}
               code={code}
               language={problem.language}
               onChange={updateDraft}

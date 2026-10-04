@@ -103,6 +103,5 @@ and forwards gRPC to the judge, which listens only on `127.0.0.1:8080`.
 To update the judge, repeat steps 3 and 4 for what changed, then
 `sudo systemctl restart code-practice-judge`. Queued submissions wait in Neon meanwhile.
 
-The app uses the existing Neon schema and hosted judge. Database changes are applied
-manually when needed; starting or deploying the website does not provision either.
-Never commit credentials.
+The schema lives in Neon, and database changes are applied by hand; starting or deploying the
+website doesn't change it. Never commit credentials.

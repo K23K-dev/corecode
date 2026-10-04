@@ -24,13 +24,13 @@ import type { Problem } from '../schemas/catalog';
 import type { ProgressData } from '../schemas/progress';
 import { DIFFICULTIES, DIFFICULTY_COLORS } from '../lib/theme';
 
-/** Formats a YYYY-MM-DD calendar date without shifting it into another time zone. */
+// Formats a YYYY-MM-DD calendar date without shifting it into another time zone.
 const formatDate = (date: string, options: Intl.DateTimeFormatOptions) =>
   new Intl.DateTimeFormat(undefined, { ...options, timeZone: 'UTC' }).format(
     new Date(`${date}T12:00:00Z`),
   );
 
-/** Solved counts per difficulty, and a ring with one colored section per difficulty. */
+// Solved counts per difficulty, and a ring with one colored section per difficulty.
 function ProgressSummary({ problems, progress }: { problems: Problem[]; progress: ProgressData }) {
   const totals = DIFFICULTIES.map((difficulty) => {
     const items = problems.filter((item) => item.difficulty === difficulty);

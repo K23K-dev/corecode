@@ -28,8 +28,8 @@ func main() {
 	}
 }
 
-func serve(ctx context.Context) (result error) {
-	cfg, err := loadConfig()
+func serve(ctx context.Context) error {
+	database, err := databaseConfig(os.Getenv("POSTGRES_URL"))
 	if err != nil {
 		return err
 	}
@@ -43,7 +43,7 @@ func serve(ctx context.Context) (result error) {
 	}
 	defer listener.Close()
 
-	pool, err := pgxpool.NewWithConfig(ctx, cfg.database)
+	pool, err := pgxpool.NewWithConfig(ctx, database)
 	if err != nil {
 		return errors.New("Cannot configure the judge's Neon connection.")
 	}
@@ -53,76 +53,58 @@ func serve(ctx context.Context) (result error) {
 		return errors.New("Cannot configure Docker; check DOCKER_HOST and Docker TLS settings.")
 	}
 	defer docker.Close()
-	workCtx, cancelWork := context.WithCancel(context.Background())
-	defer cancelWork()
-	executor := newExecutor(workCtx, docker, cfg)
-	queue := newJobQueue(workCtx, &jobStore{pool: pool}, executor)
+	store := &jobStore{pool: pool}
+	queue := newJobQueue(store, &executor{docker: docker})
+	go queue.start()
 
 	// Caddy forwards gRPC as HTTP/2 without TLS (h2c); HTTP/1.1 still serves gRPC-Web and Connect.
 	protocols := new(http.Protocols)
 	protocols.SetHTTP1(true)
 	protocols.SetUnencryptedHTTP2(true)
 	server := &http.Server{
-		Handler:           newHandler(token, &judgeServer{queue: queue}),
+		Handler:           newHandler(token, &rpcServer{queue: queue, store: store}),
 		Protocols:         protocols,
 		ReadHeaderTimeout: 5 * time.Second,
 		IdleTimeout:       75 * time.Second,
 	}
-	queueDone := make(chan struct{})
-	// Until Docker is ready and leftover containers are gone, calls get Unavailable.
-	go func() {
-		defer close(queueDone)
-		if executor.prepare(workCtx) {
-			queue.serve()
-		}
-	}()
-
-	// Shutdown stops new work, gives running work five seconds, then cancels it.
-	// Interrupted jobs return to the queue for one more attempt.
-	defer func() {
-		shutdownCtx, stopShutdown := context.WithTimeout(context.Background(), 30*time.Second)
-		defer stopShutdown()
-		drained := make(chan struct{})
-		go func() {
-			queue.beginDrain()
-			queue.wait()
-			close(drained)
-		}()
-		select {
-		case <-drained:
-		case <-time.After(5 * time.Second):
-		}
-		cancelWork()
-		closed := make(chan struct{})
-		go func() {
-			<-drained
-			<-queueDone
-			// Give final RPC replies a second to flush, then close the server.
-			stopCtx, cancelStop := context.WithTimeout(context.Background(), time.Second)
-			if server.Shutdown(stopCtx) != nil {
-				server.Close()
-			}
-			cancelStop()
-			pool.Close()
-			close(closed)
-		}()
-		select {
-		case <-closed:
-		case <-shutdownCtx.Done():
-			go server.Close()
-			result = errors.New("Shutdown took over 30 seconds; unfinished jobs retry when their leases expire.")
-		}
-	}()
-
-	serveDone := make(chan error, 1)
-	go func() { serveDone <- server.Serve(listener) }()
+	served := make(chan error, 1)
+	go func() { served <- server.Serve(listener) }()
 	log.Printf("Judge listening on %s.", judgeAddress)
+
+	var stopped error
 	select {
-	case err := <-serveDone:
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
-			return errors.New("The judge listener stopped unexpectedly.")
+	case err := <-served:
+		if !errors.Is(err, http.ErrServerClosed) {
+			stopped = errors.New("The judge listener stopped unexpectedly.")
 		}
 	case <-ctx.Done():
 	}
-	return nil
+	if err := shutdown(server, queue, pool); err != nil {
+		return err
+	}
+	return stopped
+}
+
+// shutdown stops new work, gives running work five seconds, then cancels it; interrupted jobs
+// return to the queue for one more attempt. It gives up after 30 seconds.
+func shutdown(server *http.Server, queue *jobQueue, pool *pgxpool.Pool) error {
+	done := make(chan struct{})
+	go func() {
+		queue.drain(5 * time.Second)
+		// Give final RPC replies a second to flush, then close the server.
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second)
+		defer cancel()
+		if server.Shutdown(ctx) != nil {
+			server.Close()
+		}
+		pool.Close()
+		close(done)
+	}()
+	select {
+	case <-done:
+		return nil
+	case <-time.After(30 * time.Second):
+		go server.Close()
+		return errors.New("Shutdown took over 30 seconds; unfinished jobs retry when their leases expire.")
+	}
 }

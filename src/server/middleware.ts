@@ -13,7 +13,7 @@ export class RequestError extends Error {
   }
 }
 
-/** Host and CSRF checks, not authentication: Vercel Authentication gates the hosted site. */
+// Host and CSRF checks, not authentication: Vercel Authentication gates the hosted site.
 export function protectRequest(appOrigin: string, hosted: boolean): (request: Request) => void {
   const { host, port } = new URL(appOrigin);
   const hosts = hosted
@@ -49,7 +49,7 @@ export function protectRequest(appOrigin: string, hosted: boolean): (request: Re
   };
 }
 
-/** A write's JSON body of at most 10 MiB, checked before reading and again after. */
+// A write's JSON body of at most 10 MiB, checked before reading and again after.
 export async function jsonBody(c: Context): Promise<unknown> {
   const tooLarge = new RequestError(
     'Save request exceeds the 10 MiB limit.',
@@ -66,7 +66,7 @@ export async function jsonBody(c: Context): Promise<unknown> {
   }
 }
 
-/** Every API error has the same shape: { error, code }. */
+// Every API error has the same shape: { error, code }.
 export function errorResponse(c: Context, error: unknown): Response {
   if (error instanceof ZodError)
     return c.json(

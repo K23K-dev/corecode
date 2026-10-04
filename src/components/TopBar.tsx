@@ -1,19 +1,12 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { Anchor, Box, Group } from '@mantine/core';
+import { Anchor, Group } from '@mantine/core';
 import { Code2 } from 'lucide-react';
 
-/** The header on every screen: the brand links home, followed by the page's own navigation. */
+// The header on every screen: the brand links home, followed by the page's own navigation.
 export default function TopBar({ children }: { children?: ReactNode }) {
   return (
-    <Box
-      component="header"
-      h={56}
-      px="md"
-      bg="dark.8"
-      display="flex"
-      style={{ alignItems: 'center', justifyContent: 'space-between' }}
-    >
+    <Group component="header" h={56} px="md" bg="dark.8" justify="space-between" wrap="nowrap">
       <Anchor
         component={Link}
         href="/"
@@ -28,6 +21,6 @@ export default function TopBar({ children }: { children?: ReactNode }) {
         </Group>
       </Anchor>
       {children}
-    </Box>
+    </Group>
   );
 }

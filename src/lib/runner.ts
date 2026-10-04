@@ -25,7 +25,7 @@ function jobSnapshot(value: unknown): JobSnapshot {
   return parsed.data;
 }
 
-/** Resolve after `ms`, or as soon as `signal` aborts. */
+// Resolve after `ms`, or as soon as `signal` aborts.
 function pause(ms: number, signal: AbortSignal) {
   return new Promise<void>((resolve) => {
     if (signal.aborted) return resolve();
@@ -83,7 +83,7 @@ function forgetPending(id: string) {
   }
 }
 
-/** Owns temporary requests and durable recovery; only an explicit Stop cancels a job. */
+// Owns temporary requests and durable recovery; only an explicit Stop cancels a job.
 export class Runner {
   // The active run or observation: its abort controller, the submission being sent,
   // its latest snapshot, and where cancel() delivers the Stop response.
@@ -92,7 +92,7 @@ export class Runner {
   private job: JobSnapshot | null = null;
   private receive: OnJob | null = null;
 
-  /** Judge calls outlast autosave's timeout: a submission can wait in the queue first. */
+  // Judge calls outlast autosave's timeout: a submission can wait in the queue first.
   private call(path: string, signal: AbortSignal, body?: unknown, timeoutMs = 30_000) {
     return requestJson(path, { signal, body, timeoutMs });
   }
@@ -187,7 +187,7 @@ export class Runner {
     return this.observe(job, signal, onJob, pending.code);
   }
 
-  /** Reconnects to this problem's submissions saved in the browser, resending the same UUIDs. */
+  // Reconnects to this problem's submissions saved in the browser, resending the same UUIDs.
   async recover(problem: Problem, onJob?: OnJob): Promise<ExecutionOutcome | null> {
     const controller = this.begin();
     try {
@@ -209,7 +209,7 @@ export class Runner {
     }
   }
 
-  /** Poll once a second until the job finishes, backing off while its status is unavailable. */
+  // Poll once a second until the job finishes, backing off while its status is unavailable.
   private async observe(
     initial: JobSnapshot,
     signal: AbortSignal,
@@ -269,7 +269,7 @@ export class Runner {
     this.receive = null;
   }
 
-  /** Stop: abandon a Run or a submission the judge hasn't confirmed; cancel a confirmed one. */
+  // Stop: abandon a Run or a submission the judge hasn't confirmed; cancel a confirmed one.
   async cancel(): Promise<JobSnapshot | void> {
     const id = this.job?.jobId;
     if (!id) {

@@ -39,105 +39,129 @@ func authenticate(token string, next http.Handler) http.Handler {
 				return
 			}
 		}
-		_ = errorWriter.Write(w, r, rpcError(connect.CodeUnauthenticated, "Judge authentication is required."))
+		_ = errorWriter.Write(w, r, connect.NewError(connect.CodeUnauthenticated, errors.New("Judge authentication is required.")))
 	})
 }
 
-// rpcError is a status error that Connect encodes for gRPC, gRPC-Web, and Connect clients.
-func rpcError(code connect.Code, message string) error {
-	return connect.NewError(code, errors.New(message))
+// rpcServer implements JudgeService: it checks input and turns errors into gRPC statuses.
+type rpcServer struct {
+	judgev1connect.UnimplementedJudgeServiceHandler
+	queue *jobQueue
+	store *jobStore
 }
 
-// contextError reports a canceled or expired request with the matching status.
-func contextError(err error) error {
-	if errors.Is(err, context.DeadlineExceeded) {
-		return connect.NewError(connect.CodeDeadlineExceeded, err)
+func (s *rpcServer) Run(ctx context.Context, request *judgev1.RunRequest) (*judgev1.RunResult, error) {
+	if err := checkProblem(request.ProblemId, request.ProblemVersion, request.Code); err != nil {
+		return nil, err
 	}
-	return connect.NewError(connect.CodeCanceled, err)
+	result, err := s.queue.run(ctx, request.ProblemId, request.ProblemVersion, request.Code)
+	return result, rpcError(err)
 }
 
-var jobIDPattern = regexp.MustCompile(`^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$`)
+func (s *rpcServer) Submit(ctx context.Context, request *judgev1.SubmitRequest) (*judgev1.JobSnapshot, error) {
+	id, err := jobID(request.SubmissionId)
+	if err != nil {
+		return nil, err
+	}
+	if err := checkProblem(request.ProblemId, request.ProblemVersion, request.Code); err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	job, err := s.queue.submit(ctx, submission{id, request.ProblemId, request.ProblemVersion, request.Code})
+	return snapshot(job), rpcError(err)
+}
+
+func (s *rpcServer) GetJob(ctx context.Context, request *judgev1.JobRequest) (*judgev1.JobSnapshot, error) {
+	id, err := jobID(request.JobId)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	job, err := s.store.find(ctx, id)
+	return snapshot(job), rpcError(err)
+}
+
+func (s *rpcServer) CancelJob(ctx context.Context, request *judgev1.JobRequest) (*judgev1.JobSnapshot, error) {
+	id, err := jobID(request.JobId)
+	if err != nil {
+		return nil, err
+	}
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	job, err := s.queue.cancel(ctx, id)
+	return snapshot(job), rpcError(err)
+}
+
+var (
+	jobIDPattern          = regexp.MustCompile(`^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{4}-[a-fA-F0-9]{12}$`)
+	problemVersionPattern = regexp.MustCompile(`^[a-f0-9]{64}$`)
+)
 
 func jobID(value string) (string, error) {
 	if !jobIDPattern.MatchString(value) {
-		return "", rpcError(connect.CodeInvalidArgument, "Provide a UUID job ID.")
+		return "", invalidArgument("Provide a UUID job ID.")
 	}
 	return strings.ToLower(value), nil
 }
 
-// judgeServer implements JudgeService; jobs live in Neon and run through the queue.
-type judgeServer struct {
-	judgev1connect.UnimplementedJudgeServiceHandler
-	queue *jobQueue
+func checkProblem(id, version, code string) error {
+	if strings.TrimSpace(id) == "" || len(id) > 800 || !problemVersionPattern.MatchString(version) {
+		return invalidArgument("Provide a valid problem ID and version.")
+	}
+	if len(code) > 51200 {
+		return invalidArgument("Keep code under 50 KiB.")
+	}
+	return nil
 }
 
-func (s *judgeServer) Run(ctx context.Context, request *judgev1.RunRequest) (*judgev1.RunResult, error) {
-	return s.queue.run(ctx, request)
+func invalidArgument(message string) error {
+	return connect.NewError(connect.CodeInvalidArgument, errors.New(message))
 }
 
-func (s *judgeServer) Submit(ctx context.Context, request *judgev1.SubmitRequest) (*judgev1.JobSnapshot, error) {
-	id, err := jobID(request.GetSubmissionId())
-	if err != nil {
-		return nil, err
+// statusCodes gives each of the judge's errors its gRPC status.
+var statusCodes = map[error]connect.Code{
+	context.Canceled:         connect.CodeCanceled,
+	context.DeadlineExceeded: connect.CodeDeadlineExceeded,
+	errProblemNotFound:       connect.CodeNotFound,
+	errJobNotFound:           connect.CodeNotFound,
+	errSubmissionReused:      connect.CodeAlreadyExists,
+	errProblemChanged:        connect.CodeFailedPrecondition,
+	errInvalidSpec:           connect.CodeFailedPrecondition,
+	errInvalidResult:         connect.CodeFailedPrecondition,
+	errSlotsBusy:             connect.CodeResourceExhausted,
+	errRuntimeUnavailable:    connect.CodeUnavailable,
+	errShuttingDown:          connect.CodeUnavailable,
+	errContainerFailed:       connect.CodeUnavailable,
+	errDatabase:              connect.CodeUnavailable,
+}
+
+// rpcError gives an error its gRPC status. An unlisted error is reported without its details.
+func rpcError(err error) error {
+	if err == nil {
+		return nil
 	}
-	request.SubmissionId = id
-	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
-	defer cancel()
-	// An acknowledged UUID remains usable when the catalog or runtime changes.
-	existing, err := s.queue.store.find(ctx, id)
-	if err != nil {
-		return nil, err
-	}
-	if existing != nil {
-		if existing.fingerprint != submissionFingerprint(request) {
-			return nil, rpcError(connect.CodeAlreadyExists, "That submission ID was already used for different input.")
+	for known, code := range statusCodes {
+		if errors.Is(err, known) {
+			return connect.NewError(code, known)
 		}
-		return existing.snapshot, nil
 	}
-	input, err := prepareExecution(ctx, s.queue.store.pool, &judgev1.RunRequest{
-		ProblemId: request.ProblemId, ProblemVersion: request.ProblemVersion, Code: request.Code,
-	}, "submit")
-	if err != nil {
-		return nil, err
-	}
-	image, err := s.queue.executor.imageFor(input.runtime)
-	if err != nil {
-		return nil, err
-	}
-	accepted, err := s.queue.store.accept(ctx, request, input.specVersion, input.runtime, image)
-	if err == nil {
-		s.queue.notify()
-	}
-	return accepted, err
+	return connect.NewError(connect.CodeUnavailable, errors.New("The judge is temporarily unavailable."))
 }
 
-func (s *judgeServer) GetJob(ctx context.Context, request *judgev1.JobRequest) (*judgev1.JobSnapshot, error) {
-	id, err := jobID(request.GetJobId())
-	if err != nil {
-		return nil, err
-	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	job, err := s.queue.store.find(ctx, id)
-	if err != nil {
-		return nil, err
-	}
+var jobStates = map[string]judgev1.JobState{
+	"queued": judgev1.JobState_JOB_STATE_QUEUED, "running": judgev1.JobState_JOB_STATE_RUNNING,
+	"canceling": judgev1.JobState_JOB_STATE_CANCELING, "completed": judgev1.JobState_JOB_STATE_COMPLETED,
+	"failed": judgev1.JobState_JOB_STATE_FAILED, "canceled": judgev1.JobState_JOB_STATE_CANCELED,
+}
+
+func snapshot(job *storedJob) *judgev1.JobSnapshot {
 	if job == nil {
-		return nil, rpcError(connect.CodeNotFound, "Job not found.")
+		return nil
 	}
-	return job.snapshot, nil
-}
-
-func (s *judgeServer) CancelJob(ctx context.Context, request *judgev1.JobRequest) (*judgev1.JobSnapshot, error) {
-	id, err := jobID(request.GetJobId())
-	if err != nil {
-		return nil, err
+	return &judgev1.JobSnapshot{
+		JobId: job.id, ProblemId: job.problemID, State: jobStates[job.state],
+		Result: job.result, Error: job.failure, Revision: job.revision,
 	}
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
-	job, err := s.queue.store.cancel(ctx, id)
-	if err == nil {
-		s.queue.cancelActive(id)
-	}
-	return job, err
 }

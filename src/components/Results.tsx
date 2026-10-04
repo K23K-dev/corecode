@@ -11,7 +11,7 @@ export interface Execution {
   jobState?: JobSnapshot['state'];
 }
 
-/** One labeled output box; a colored edge marks a passing or failing value. */
+// One labeled output box; a colored edge marks a passing or failing value.
 function Value({ label, value, color }: { label: string; value: string; color?: string }) {
   return (
     <section aria-label={label}>
@@ -22,7 +22,6 @@ function Value({ label, value, color }: { label: string; value: string; color?: 
         block
         mah={240}
         style={{
-          overflow: 'auto',
           whiteSpace: 'pre-wrap',
           overflowWrap: 'anywhere',
           borderLeft: color && `3px solid var(--mantine-color-${color}-6)`,

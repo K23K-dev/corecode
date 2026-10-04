@@ -33,7 +33,7 @@ function previewScript(assets: Record<string, string>) {
 // Authored text must not end the <style> or <script> element early.
 const escapeEndTags = (text: string) => text.replaceAll('</', '<\\/');
 
-/** The preview page: the problem's target HTML and CSS, with the script above. */
+// The preview page: the problem's target HTML and CSS, with the script above.
 function previewDocument(problem: Problem) {
   const preview = problem.preview!;
   const css = `html, body { margin: 0; }\n${preview.css ?? ''}\n${problem.extension === 'css' ? problem.referenceCode : ''}`;
@@ -54,7 +54,7 @@ function previewDocument(problem: Problem) {
   <body>${html}<script type="module">${escapeEndTags(script)}</script></body></html>`;
 }
 
-/** Displays the authored target, never the learner's editor contents. */
+// Displays the authored target, never the learner's editor contents.
 export default function FrontendPreview({ problem }: { problem: Problem }) {
   const canvas = useRef<HTMLDivElement>(null);
   const frame = useRef<HTMLIFrameElement>(null);

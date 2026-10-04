@@ -7,11 +7,8 @@ import (
 	"errors"
 	"io"
 	"log"
-	"sync"
 	"time"
 
-	"connectrpc.com/connect"
-	judgev1 "github.com/K23K-dev/corecode/judge/gen"
 	"github.com/containerd/errdefs"
 	"github.com/moby/moby/api/pkg/stdcopy"
 	"github.com/moby/moby/api/types/container"
@@ -20,39 +17,40 @@ import (
 
 const maxExecutionOutput = 512000
 
-var errOutputLimit = errors.New("Execution output exceeded 512 KB.")
-
 // Every grading container carries this label, so the next judge start can remove leftovers.
 const judgeLabel = "code-practice.judge"
 
-// One executor owns two execution slots shared by temporary runs and queued submissions.
-type executor struct {
-	ctx      context.Context
-	docker   *client.Client
-	images   map[string]string // runtime → grader image
-	mu       sync.Mutex
-	ready    bool
-	draining bool
-	active   int
-	work     sync.WaitGroup
+// The grader image for each runtime; npm run judge:images builds them.
+var graderImages = map[string]string{
+	"python": "cp-practice-python:3", "sql": "cp-practice-python:3", "javascript": "coding-practice-js:4",
 }
 
-func newExecutor(ctx context.Context, docker *client.Client, cfg config) *executor {
-	return &executor{ctx: ctx, docker: docker, images: map[string]string{
-		"python": cfg.pythonImage, "sql": cfg.pythonImage, "javascript": cfg.javascriptImage,
-	}}
-}
+// limitError means the learner's code broke a limit. It becomes the result's error, not a failure.
+type limitError string
 
-// prepare waits for Docker and both grader images, then removes leftover containers.
+func (e limitError) Error() string { return string(e) }
+
+const (
+	errTimedOut    = limitError("Execution timed out after 20 seconds.")
+	errOutOfMemory = limitError("Execution exceeded its memory limit.")
+	errOutputLimit = limitError("Execution output exceeded 512 KB.")
+)
+
+var errContainerFailed = errors.New("The execution container failed. Try again shortly.")
+
+// executor runs each grader in a fresh Docker container and always removes it.
+type executor struct{ docker *client.Client }
+
+func (e *executor) supports(runtime string) bool { return graderImages[runtime] != "" }
+
+// prepare waits for Docker and both grader images, then removes containers an earlier judge left.
 // It returns false if the judge stops first.
 func (e *executor) prepare(ctx context.Context) bool {
 	for waiting := false; ; waiting = true {
-		if err := e.removeLeftovers(ctx); err == nil {
-			e.mu.Lock()
-			e.ready = true
-			e.mu.Unlock()
+		if e.removeLeftovers(ctx) == nil {
 			return true
-		} else if !waiting {
+		}
+		if !waiting {
 			log.Print("Waiting for Docker and the grader images.")
 		}
 		select {
@@ -64,7 +62,7 @@ func (e *executor) prepare(ctx context.Context) bool {
 }
 
 func (e *executor) removeLeftovers(ctx context.Context) error {
-	for _, image := range e.images {
+	for _, image := range graderImages {
 		if inspected, err := e.docker.ImageInspect(ctx, image); err != nil || inspected.Os != "linux" {
 			return errors.New("a grader image is unavailable")
 		}
@@ -84,171 +82,94 @@ func (e *executor) removeLeftovers(ctx context.Context) error {
 	return nil
 }
 
-func (e *executor) available() bool {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	return e.ready && !e.draining && e.ctx.Err() == nil
-}
-
-func (e *executor) beginDrain() {
-	e.mu.Lock()
-	e.draining = true
-	e.mu.Unlock()
-}
-
-func (e *executor) imageFor(runtime string) (string, error) {
-	if image := e.images[runtime]; image != "" && e.available() {
-		return image, nil
-	}
-	return "", rpcError(connect.CodeUnavailable, "The execution runtime is unavailable.")
-}
-
-// acquire takes one of the two execution slots; every successful acquire needs one release.
-func (e *executor) acquire() error {
-	e.mu.Lock()
-	defer e.mu.Unlock()
-	switch {
-	case !e.ready || e.draining || e.ctx.Err() != nil:
-		return rpcError(connect.CodeUnavailable, "The execution runtime is unavailable.")
-	case e.active >= 2:
-		return rpcError(connect.CodeResourceExhausted, "Both execution slots are busy. Try again shortly.")
-	}
-	e.active++
-	e.work.Add(1)
-	return nil
-}
-
-func (e *executor) release() {
-	e.mu.Lock()
-	e.active--
-	e.mu.Unlock()
-	e.work.Done()
-}
-
-// run grades one payload in a fresh, locked-down container and always removes it.
-func (e *executor) run(ctx context.Context, input executionInput) (*judgev1.RunResult, error) {
-	started := time.Now()
+// run gives one payload to a grader with a 20-second limit and returns the grader's stdout.
+// Errors are ctx's own (Stop, a canceled Run, or shutdown), a limitError, or errContainerFailed.
+func (e *executor) run(ctx context.Context, runtime, name string, payload []byte) ([]byte, error) {
 	runCtx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	stop := context.AfterFunc(e.ctx, cancel)
-	defer func() { stop(); cancel() }()
-	failure := func(cause error) (*judgev1.RunResult, error) {
-		if ctx.Err() != nil {
-			return nil, contextError(ctx.Err())
+	defer cancel()
+	failed := func(cause error) ([]byte, error) {
+		switch {
+		case ctx.Err() != nil:
+			return nil, ctx.Err()
+		case errors.Is(cause, errOutputLimit):
+			return nil, errOutputLimit
+		case runCtx.Err() != nil:
+			return nil, errTimedOut
 		}
-		if e.ctx.Err() != nil {
-			return nil, rpcError(connect.CodeUnavailable, "The judge is shutting down.")
-		}
-		message := ""
-		if errors.Is(cause, errOutputLimit) {
-			message = errOutputLimit.Error()
-		} else if errors.Is(runCtx.Err(), context.DeadlineExceeded) {
-			message = "Execution timed out after 20 seconds."
-		}
-		if message != "" {
-			return &judgev1.RunResult{Error: &message, DurationMs: float64(time.Since(started).Milliseconds())}, nil
-		}
-		return nil, rpcError(connect.CodeUnavailable, "The execution container failed. Try again shortly.")
+		return nil, errContainerFailed
 	}
 
-	image := e.images[input.runtime]
+	image := graderImages[runtime]
 	inspected, err := e.docker.ImageInspect(runCtx, image)
 	if err != nil || inspected.Config == nil || len(inspected.Config.Entrypoint) == 0 {
-		return failure(err)
+		return failed(err)
 	}
-	name := input.name
 	if name == "" {
 		name = "cp-job-" + rand.Text()
 	}
 	// Removing by name also covers a create that finished in Docker after timing out here.
 	defer e.remove(name)
-	// Finish Docker's setup handshake even if Stop arrives, so no half-made container remains.
+	// Attach before starting, so no output is missed. Setup finishes even if Stop arrives, so no
+	// half-made container remains.
 	setupCtx, finishSetup := context.WithTimeout(context.WithoutCancel(runCtx), 10*time.Second)
 	defer finishSetup()
 	created, err := e.docker.ContainerCreate(setupCtx, executionContainer(image, name, inspected.Config.Entrypoint))
 	if err != nil {
-		return failure(err)
+		return failed(err)
 	}
-	attachment, err := e.docker.ContainerAttach(setupCtx, created.ID, client.ContainerAttachOptions{
+	stream, err := e.docker.ContainerAttach(setupCtx, created.ID, client.ContainerAttachOptions{
 		Stream: true, Stdin: true, Stdout: true, Stderr: true,
 	})
 	if err != nil {
-		return failure(err)
+		return failed(err)
 	}
-	defer attachment.Close()
+	defer stream.Close()
 	finishSetup()
-	if runCtx.Err() != nil {
-		return failure(runCtx.Err())
-	}
-	closeOnCancel := context.AfterFunc(runCtx, attachment.Close)
-	defer closeOnCancel()
-
-	output := &executionOutput{}
-	drained := make(chan error, 1)
-	go func() {
-		_, copyErr := stdcopy.StdCopy(output, outputCounter{output}, attachment.Reader)
-		drained <- copyErr
-	}()
+	// A cancel or the time limit closes the stream, which ends both copies below.
+	stopClosing := context.AfterFunc(runCtx, stream.Close)
+	defer stopClosing()
 	if _, err = e.docker.ContainerStart(runCtx, created.ID, client.ContainerStartOptions{}); err != nil {
-		return failure(err)
+		return failed(err)
 	}
+
 	sent := make(chan error, 1)
 	go func() {
-		_, sendErr := io.Copy(attachment.Conn, bytes.NewReader(input.payload))
-		if sendErr == nil {
-			sendErr = attachment.CloseWrite()
+		_, err := io.Copy(stream.Conn, bytes.NewReader(payload))
+		if err == nil {
+			err = stream.CloseWrite()
 		}
-		sent <- sendErr
+		sent <- err
 	}()
-	// Always receive the SDK's unbuffered wait result, even after a cancel, or its goroutine leaks.
+	// Read until the grader exits.
+	output := &executionOutput{}
+	if _, err = stdcopy.StdCopy(output, outputCounter{output}, stream.Reader); err != nil {
+		return failed(err)
+	}
+	if err = <-sent; err != nil {
+		return failed(err)
+	}
+	// Always receive the SDK's unbuffered wait result, or its goroutine leaks.
 	wait := e.docker.ContainerWait(runCtx, created.ID, client.ContainerWaitOptions{Condition: container.WaitConditionNotRunning})
-	type exit struct {
-		response container.WaitResponse
-		err      error
+	var exit container.WaitResponse
+	select {
+	case exit = <-wait.Result:
+	case err = <-wait.Error:
+		return failed(err)
 	}
-	exited := make(chan exit, 1)
-	go func() {
-		select {
-		case response := <-wait.Result:
-			exited <- exit{response: response}
-		case waitErr := <-wait.Error:
-			exited <- exit{err: waitErr}
-		}
-	}()
-	var state container.WaitResponse
-	for remaining := 3; remaining > 0; remaining-- {
-		select {
-		case <-runCtx.Done():
-			return failure(runCtx.Err())
-		case sendErr := <-sent:
-			sent = nil
-			if sendErr != nil {
-				return failure(sendErr)
-			}
-		case copyErr := <-drained:
-			drained = nil
-			if copyErr != nil {
-				return failure(copyErr)
-			}
-		case stopped := <-exited:
-			exited = nil
-			if stopped.err != nil || stopped.response.Error != nil {
-				return failure(stopped.err)
-			}
-			state = stopped.response
-		}
+	switch {
+	case runCtx.Err() != nil || exit.Error != nil:
+		return failed(runCtx.Err())
+	case exit.StatusCode != 0 && e.oomKilled(runCtx, created.ID):
+		return nil, errOutOfMemory
+	case exit.StatusCode != 0:
+		return failed(nil)
 	}
-	if runCtx.Err() != nil {
-		return failure(runCtx.Err())
-	}
-	if state.StatusCode != 0 {
-		inspected, inspectErr := e.docker.ContainerInspect(runCtx, created.ID, client.ContainerInspectOptions{})
-		if inspectErr == nil && inspected.Container.State != nil && inspected.Container.State.OOMKilled {
-			message := "Execution exceeded its memory limit."
-			return &judgev1.RunResult{Error: &message, DurationMs: float64(time.Since(started).Milliseconds())}, nil
-		}
-		return failure(nil)
-	}
-	return parseExecutionResult(output.stdout.Bytes(), input.caseCount)
+	return output.stdout.Bytes(), nil
+}
+
+func (e *executor) oomKilled(ctx context.Context, id string) bool {
+	inspected, err := e.docker.ContainerInspect(ctx, id, client.ContainerInspectOptions{})
+	return err == nil && inspected.Container.State != nil && inspected.Container.State.OOMKilled
 }
 
 func (e *executor) remove(name string) {

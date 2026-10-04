@@ -108,7 +108,7 @@ export async function gradeFrontendCase({
   }
 }
 
-/** Layout exercises describe their page in the spec; every other exercise renders into #root. */
+// Layout exercises describe their page in the spec; every other exercise renders into #root.
 export function createFrontendFixture(spec, variant) {
   if (!spec.fixture) return { width: 900, html: '<div id="root"></div>' };
   return new Function(`return (${spec.fixture});`)()(variant);

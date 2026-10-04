@@ -25,7 +25,7 @@ import { useProblemList } from '../hooks/useProblemList';
 
 const MemoizedProgressSidebar = memo(ProgressSidebar);
 
-/** "/": every problem by deck, with search and the progress sidebar. */
+// "/": every problem by deck, with search and the progress sidebar.
 export default function ProblemListPage() {
   const { catalog, store } = useAppData();
   const { progress, stars } = useSyncExternalStore(store.subscribe, store.getSnapshot);

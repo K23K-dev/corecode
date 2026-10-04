@@ -22,7 +22,7 @@ function readAppOrigin(environment: Environment, hosted: boolean) {
   return new URL(origin).origin;
 }
 
-/** The Neon connection string. Errors never echo it, since it contains the password. */
+// The Neon connection string. Errors never echo it, since it contains the password.
 function readDatabaseURL(value: string) {
   if (!value) throw new Error('POSTGRES_URL is required. Add your Neon connection string to .env.');
   try {
@@ -50,7 +50,7 @@ function openPool(url: URL, hosted: boolean) {
   return pool;
 }
 
-/** Both websites use the same judge, on its VM, with a token it checks on every call. */
+// Both websites use the same judge, on its VM, with a token it checks on every call.
 function readJudge(environment: Environment) {
   const token = environment.JUDGE_TOKEN ?? '';
   if (token.length < 32) throw new Error('JUDGE_TOKEN must be at least 32 characters.');
@@ -59,7 +59,7 @@ function readJudge(environment: Environment) {
   return createJudge(address, token);
 }
 
-/** Reads private configuration once per warm function; connections open on first use. */
+// Reads private configuration once per warm function; connections open on first use.
 export function loadConfig(environment: Environment) {
   const hosted = environment.VERCEL === '1';
   const appOrigin = readAppOrigin(environment, hosted);
@@ -73,5 +73,5 @@ export function loadConfig(environment: Environment) {
   };
 }
 
-/** What the router hands every controller: the configured services and the parsed JSON body. */
+// What the router hands every controller: the configured services and the parsed JSON body.
 export type ApiEnv = { Variables: { services: ReturnType<typeof loadConfig>; body: unknown } };

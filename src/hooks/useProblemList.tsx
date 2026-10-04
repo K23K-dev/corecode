@@ -11,12 +11,12 @@ function useViewState() {
 }
 const ViewContext = createContext<ReturnType<typeof useViewState> | null>(null);
 
-/** The root layout renders this, so the search and open decks survive visits to problems. */
+// The root layout renders this, so the search and open decks survive visits to problems.
 export function ProblemListProvider({ children }: { children: ReactNode }) {
   return <ViewContext.Provider value={useViewState()}>{children}</ViewContext.Provider>;
 }
 
-/** The search, the decks it shows with their solved counts, and which decks are open. */
+// The search, the decks it shows with their solved counts, and which decks are open.
 export function useProblemList({ decks, problems }: Catalog, progress: ProgressData) {
   const state = useContext(ViewContext);
   if (!state) throw new Error('The problem list must be opened inside ProblemListProvider.');

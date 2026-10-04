@@ -13,7 +13,7 @@ import { JudgeService, type JobSnapshot, type RunResult } from './gen/judge_pb';
 type JudgeClient = Client<typeof JudgeService>;
 type SignalOptions = { signal?: AbortSignal };
 
-/** gRPC over HTTP/2 to the judge's VM, where Caddy terminates HTTPS. */
+// gRPC over HTTP/2 to the judge's VM, where Caddy terminates HTTPS.
 function createJudgeClient(address: string, token: string): JudgeClient {
   const url = new URL(address);
   // The token travels only over HTTPS, or plain HTTP on this machine (an SSH tunnel).
@@ -48,7 +48,7 @@ const JOB_STATES = [
   'canceled',
 ] as const;
 
-/** gRPC status → [HTTP status, API error code, message]; anything else is 503. */
+// gRPC status → [HTTP status, API error code, message]; anything else is 503.
 const JUDGE_ERRORS: Partial<Record<Code, [number, string, string]>> = {
   [Code.InvalidArgument]: [400, 'invalid_request', 'The execution request is invalid.'],
   [Code.NotFound]: [404, 'not_found', 'The problem or submission was not found.'],
@@ -117,7 +117,7 @@ function snapshot(value: JobSnapshot) {
   };
 }
 
-/** The judge operations the API uses, with a timeout on each call. */
+// The judge operations the API uses, with a timeout on each call.
 export function createJudge(address: string, token: string) {
   const client = createJudgeClient(address, token);
   async function call<T>(
