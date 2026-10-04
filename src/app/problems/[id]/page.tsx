@@ -84,7 +84,6 @@ function ProblemView({ problem, initialTab }: { problem: Problem; initialTab: Pr
   const {
     execution,
     running,
-    recovering,
     stopping,
     notice,
     setNotice,
@@ -260,18 +259,13 @@ function ProblemView({ problem, initialTab }: { problem: Problem; initialTab: Pr
                 <>
                   <Button
                     variant="default"
-                    disabled={recovering}
                     onClick={() => void execute('example')}
                     aria-label="Run example"
                     title="Run example · Ctrl+Enter"
                   >
                     Run
                   </Button>
-                  <Button
-                    disabled={recovering}
-                    onClick={() => void execute('submit')}
-                    title="Ctrl+Shift+Enter"
-                  >
+                  <Button onClick={() => void execute('submit')} title="Ctrl+Shift+Enter">
                     Submit
                   </Button>
                 </>

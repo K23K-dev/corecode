@@ -1,14 +1,58 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import confetti from 'canvas-confetti';
-import { Runner, type ExecutionOutcome, type JobSnapshot } from '../lib/runner';
+import { ApiError, requestJson } from '../lib/api';
 import type { ProgressStore } from '../lib/progress-store';
 import type { Problem } from '../schemas/catalog';
+import { JobSnapshotSchema, RunResultSchema, type JobSnapshot } from '../schemas/submissions';
 import type { Execution } from '../components/Results';
 
-/**
- * Run, Submit, Stop, and reconnecting to a durable submission. Each action takes a
- * new ticket, so results that arrive for an older ticket are ignored.
- */
+type Action = { controller: AbortController; jobId?: string };
+
+// Resolve after `ms`, or as soon as `signal` aborts.
+const pause = (ms: number, signal: AbortSignal) =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, ms);
+    signal.addEventListener('abort', () => resolve(), { once: true });
+  });
+
+// Sends a submission, retrying with the same UUID: the judge records it once however often it
+// arrives. A 4xx answer is final, since the problem changed or the input can never be accepted.
+async function send(body: object, signal: AbortSignal): Promise<JobSnapshot> {
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const { value } = await requestJson('/api/run', { body, signal, timeoutMs: 30_000 });
+      return JobSnapshotSchema.parse(value);
+    } catch (error) {
+      const final = error instanceof ApiError && error.status < 500 && error.status !== 429;
+      if (final || signal.aborted || attempt === 3) throw error;
+      await pause(1000 * attempt, signal);
+    }
+  }
+}
+
+// Polls once a second until the job finishes, backing off while its status is unavailable.
+async function watch(job: JobSnapshot, signal: AbortSignal, show: (job: JobSnapshot) => void) {
+  let failures = 0;
+  while (['queued', 'running', 'canceling'].includes(job.state)) {
+    await pause(failures ? Math.min(1000 * 2 ** (failures - 1), 8000) : 1000, signal);
+    try {
+      const { value } = await requestJson(`/api/jobs/${job.jobId}`, { signal, timeoutMs: 30_000 });
+      job = JobSnapshotSchema.parse(value);
+      failures = 0;
+      show(job);
+    } catch (error) {
+      if (signal.aborted) throw error;
+      if (++failures > 5)
+        throw new Error(
+          'Submission status is unavailable. Your submission is saved, and its result will appear under Submissions.',
+        );
+    }
+  }
+  return job;
+}
+
+// Run, Submit, and Stop. Leaving the page stops watching; a submission keeps running on the
+// judge, and its result appears under Submissions.
 export function useRunner(
   store: ProgressStore,
   problem: Problem,
@@ -18,117 +62,74 @@ export function useRunner(
   const [consoleOpen, setConsoleOpen] = useState(false);
   const [execution, setExecution] = useState<Execution | null>(null);
   const [running, setRunning] = useState(false);
-  const [recovering, setRecovering] = useState(true);
   const [stopping, setStopping] = useState(false);
   const [notice, setNotice] = useState('');
-  const runner = useRef<Runner | null>(null);
-  const request = useRef(0);
+  const active = useRef<Action | null>(null);
 
-  const showJob = useCallback((job: JobSnapshot, ticket: number, submittedCode?: string) => {
-    if (ticket !== request.current) return;
-    setRecovering(false);
-    setRunning(['queued', 'running', 'canceling'].includes(job.state));
-    setConsoleOpen(true);
-    setExecution({
-      mode: 'submit',
-      jobState: job.state,
-      result: job.result,
-      error:
-        job.state === 'canceled'
-          ? 'Submission canceled. Your code is still in the editor.'
-          : job.error,
-      code: submittedCode,
-    });
-  }, []);
-
-  const showDurableResult = useCallback(
-    async (outcome: ExecutionOutcome, ticket: number) => {
-      await store.refresh();
-      const job = outcome.job;
-      if (job) {
-        const saved = store
-          .getSnapshot()
-          .progress.exercises[job.problemId]?.attempts.find(
-            (attempt) => attempt.id === `judge:${job.jobId}`,
-          );
-        showJob(job, ticket, outcome.code ?? saved?.code);
-      }
-    },
-    [store, showJob],
-  );
-
-  // Reconnect to a pending or recent submission for this problem.
   useEffect(() => {
     void store.refresh();
-    const activeRunner = new Runner();
-    runner.current = activeRunner;
-    const ticket = ++request.current;
-    void activeRunner
-      .recover(problem, (job, submittedCode) => showJob(job, ticket, submittedCode))
-      .then(async (outcome) => {
-        if (outcome) await showDurableResult(outcome, ticket);
-      })
-      .catch((error) => {
-        if (ticket !== request.current) return;
-        setConsoleOpen(true);
-        setExecution({
-          mode: 'submit',
-          error: error.message ?? 'Could not reconnect to your submission.',
-        });
-      })
-      .finally(() => {
-        if (ticket === request.current) {
-          setRecovering(false);
-          setRunning(false);
-        }
-      });
-    return () => {
-      ++request.current;
-      activeRunner.detach();
-    };
-  }, [store, problem, showDurableResult, showJob]);
+    return () => active.current?.controller.abort();
+  }, [store]);
 
   const execute = useCallback(
     async (mode: 'example' | 'submit') => {
-      if (running || recovering || stopping || !runner.current) return;
-      const ticket = ++request.current;
-      const submittedCode = code;
+      if (active.current) return;
+      const action: Action = { controller: new AbortController() };
+      active.current = action;
+      const { signal } = action.controller;
+      const submitted = code;
+      const body = {
+        problemId: problem.id,
+        problemVersion: problem.version,
+        code: submitted,
+        mode,
+      };
+      const show = (job: JobSnapshot) =>
+        setExecution({
+          mode,
+          jobState: job.state,
+          result: job.result,
+          error:
+            job.state === 'canceled'
+              ? 'Submission canceled. Your code is still in the editor.'
+              : job.error,
+          code: submitted,
+        });
       setExecution({ mode });
       setRunning(true);
       onStart();
       setNotice('');
       setConsoleOpen(true);
       try {
-        const outcome = await runner.current.run(problem, submittedCode, mode, (job, savedCode) =>
-          showJob(job, ticket, savedCode),
-        );
-        if (outcome.job) {
-          await showDurableResult(outcome, ticket);
-          if (
-            ticket === request.current &&
-            outcome.result &&
-            !outcome.result.error &&
-            outcome.result.cases.every((test) => test.passed === true && !test.error)
-          )
-            void confetti({ particleCount: 80, spread: 70, disableForReducedMotion: true });
+        if (mode === 'example') {
+          const { value } = await requestJson('/api/run', { body, signal, timeoutMs: 60_000 });
+          setExecution({ mode, result: RunResultSchema.parse(value), code: submitted });
           return;
         }
-        if (ticket !== request.current) return;
-        const result = outcome.result;
-        if (!result) throw new Error('The runner did not return a result.');
-        setExecution({ mode, result, code: submittedCode });
+        let job = await send({ ...body, submissionId: crypto.randomUUID() }, signal);
+        action.jobId = job.jobId;
+        show(job);
+        job = await watch(job, signal, show);
+        await store.refresh();
+        const result = job.result;
+        if (result && !result.error && result.cases.every((test) => test.passed && !test.error))
+          void confetti({ particleCount: 80, spread: 70, disableForReducedMotion: true });
       } catch (reason) {
-        if (ticket !== request.current) return;
+        if (signal.aborted) return;
         setExecution({
           mode,
-          code: submittedCode,
+          code: submitted,
           error: reason instanceof Error ? reason.message : 'The run failed. Please try again.',
         });
       } finally {
-        if (ticket === request.current) setRunning(false);
+        if (active.current === action) {
+          active.current = null;
+          setRunning(false);
+          setStopping(false);
+        }
       }
     },
-    [running, recovering, stopping, problem, code, onStart, showJob, showDurableResult],
+    [store, problem, code, onStart],
   );
 
   // Ctrl+Enter runs the example; Ctrl+Shift+Enter submits.
@@ -147,26 +148,25 @@ export function useRunner(
     return () => window.removeEventListener('keydown', shortcut);
   }, [execute]);
 
+  // Stop: abandon a Run, or a submission the judge hasn't confirmed; cancel a confirmed one,
+  // which the next poll shows as canceling, then canceled.
   async function cancel() {
-    if (stopping) return;
-    const ticket = request.current;
+    const action = active.current;
+    if (!action || stopping) return;
     setStopping(true);
+    if (!action.jobId) {
+      action.controller.abort();
+      setExecution((current) => ({
+        mode: current?.mode ?? 'example',
+        error: 'Stopped. Your code is still in the editor.',
+      }));
+      return;
+    }
     try {
-      const job = await runner.current?.cancel();
-      if (ticket !== request.current) return;
-      if (!job) {
-        ++request.current;
-        setRunning(false);
-        setExecution((current) => ({
-          mode: current?.mode ?? 'example',
-          error: 'Stopped. Your code is still in the editor.',
-        }));
-      }
+      await requestJson(`/api/jobs/${action.jobId}/cancel`, { body: {}, timeoutMs: 30_000 });
     } catch (error) {
-      if (ticket === request.current)
-        setNotice(error instanceof Error ? error.message : 'Stop could not be confirmed.');
-    } finally {
       setStopping(false);
+      setNotice(error instanceof Error ? error.message : 'Stop could not be confirmed.');
     }
   }
 
@@ -177,7 +177,6 @@ export function useRunner(
   return {
     execution,
     running,
-    recovering,
     stopping,
     notice,
     setNotice,

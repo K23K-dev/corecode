@@ -1,9 +1,9 @@
 import { Hono } from 'hono';
+import { z } from 'zod';
+import { ExecutionRequest, JobID } from '../schemas/submissions';
 import { loadConfig, type ApiEnv } from './config';
-import * as activity from './controllers/activity';
-import * as catalog from './controllers/catalog';
-import * as progress from './controllers/progress';
-import * as submissions from './controllers/submissions';
+import { readCatalog } from './db/catalog';
+import { readState, writeState } from './db/progress';
 import { errorResponse, jsonBody, RequestError } from './middleware';
 
 let services: ApiEnv['Variables']['services'] | undefined;
@@ -41,13 +41,34 @@ router.use(async (c, next) => {
   await next();
 });
 
-router.get('/catalog', catalog.list);
-router.get('/state', progress.get);
-router.put('/state', progress.save);
-router.get('/activity', activity.list);
-router.post('/run', submissions.run);
-router.get('/jobs/:id', submissions.status);
-router.post('/jobs/:id/cancel', submissions.cancel);
+// The decks and the current version of every problem.
+router.get('/catalog', async (c) => c.json(await readCatalog(c.var.services.database())));
+
+// Drafts, stars, solved flags, and recent attempts; autosave PUTs a batch of draft and star changes.
+router.get('/state', async (c) => c.json(await readState(c.var.services.database())));
+router.put('/state', async (c) => c.json(await writeState(c.var.services.database(), c.var.body)));
+
+// Run grades the first example right away; Submit queues a durable job (202).
+router.post('/run', async (c) => {
+  const input = ExecutionRequest.parse(c.var.body);
+  const { judge } = c.var.services;
+  return input.mode === 'submit'
+    ? c.json(await judge.submit(input), 202)
+    : c.json(await judge.run(input, { signal: c.req.raw.signal }));
+});
+
+// One submission's status; the browser polls this every second.
+router.get('/jobs/:id', async (c) => {
+  const jobId = JobID.parse(c.req.param('id'));
+  return c.json(await c.var.services.judge.getJob(jobId, { signal: c.req.raw.signal }));
+});
+
+// Stop: a queued submission ends at once, a running one after cleanup.
+router.post('/jobs/:id/cancel', async (c) => {
+  const jobId = JobID.parse(c.req.param('id'));
+  z.strictObject({}).parse(c.var.body);
+  return c.json(await c.var.services.judge.cancelJob(jobId));
+});
 
 router.notFound((c) => errorResponse(c, new RequestError('Endpoint not found.', 404, 'not_found')));
 router.onError((error, c) =>

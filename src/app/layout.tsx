@@ -5,7 +5,6 @@ import AppProvider from '../components/AppProvider';
 import { ProblemListProvider } from '../hooks/useProblemList';
 import { theme } from '../lib/theme';
 import '@mantine/core/styles.css';
-import '@mantine/dates/styles.css';
 
 export const metadata: Metadata = {
   title: 'Code Practice',

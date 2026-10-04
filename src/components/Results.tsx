@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Alert, Button, Code, EmptyState, Group, Loader, Stack, Text } from '@mantine/core';
 import { Check, CircleAlert, CircleCheck, Terminal, X } from 'lucide-react';
-import type { JobSnapshot, RunResult } from '../lib/runner';
+import type { JobSnapshot, RunResult } from '../schemas/submissions';
 
 export interface Execution {
   mode: 'example' | 'submit';
@@ -60,7 +60,7 @@ export default function Results({
         }
         description={
           execution?.jobState
-            ? 'You can leave this page and return to your result.'
+            ? 'You can leave this page; the result will appear under Submissions.'
             : 'You can stop this run at any time.'
         }
       />

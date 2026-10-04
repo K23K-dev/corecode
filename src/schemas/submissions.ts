@@ -10,12 +10,6 @@ export const ExecutionRequest = z.discriminatedUnion('mode', [
   z.strictObject({ ...input, mode: z.literal('example') }),
   z.strictObject({ ...input, mode: z.literal('submit'), submissionId: JobID }),
 ]);
-// Recovery records can outlive a code change; parsing drops fields older versions saved.
-export const PendingSubmissionSchema = z.object({
-  ...input,
-  submissionId: JobID,
-  createdAt: z.number().nonnegative(),
-});
 const CaseResultSchema = z.object({
   name: z.string(),
   input: z.string(),
@@ -40,4 +34,3 @@ export const JobSnapshotSchema = z.object({
 });
 export type RunResult = z.infer<typeof RunResultSchema>;
 export type JobSnapshot = z.infer<typeof JobSnapshotSchema>;
-export type PendingSubmission = z.infer<typeof PendingSubmissionSchema>;

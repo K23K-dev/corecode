@@ -8,15 +8,13 @@ Problems, grading cases, and progress live in Neon.
 - `src/app/`: Next.js pages: `page.tsx` is the problem list (`/`) and `problems/[id]/page.tsx`
   is a problem. `api/[...path]/route.ts` hands every `/api` request to `server/router.ts`.
 - `src/components/`: React components, built from Mantine components.
-- `src/hooks/`: `useProblemList` (search and open decks) and `useRunner` (Run, Submit, Stop,
-  reconnecting).
+- `src/hooks/`: `useProblemList` (search and open decks) and `useRunner` (Run, Submit, Stop).
 - `src/lib/`: browser helpers: `api.ts` (fetch), `progress-store.ts` (saved progress and
-  autosave), `runner.ts` (Run and Submit requests), and `theme.ts` (the Mantine theme).
-- `src/schemas/`: Zod schemas both sides use: `catalog.ts`, `progress.ts`, `activity.ts`, and
-  `submissions.ts`.
+  autosave), and `theme.ts` (the Mantine theme).
+- `src/schemas/`: Zod schemas both sides use: `catalog.ts`, `progress.ts`, and `submissions.ts`.
 - `src/server/`: the backend.
-  - `router.ts`: every endpoint in one file (a Hono router), plus what runs before each one.
-  - `controllers/`: one file per resource: catalog, progress, activity, submissions.
+  - `router.ts`: every endpoint and its handler in one file (a Hono router), plus what runs
+    before each one.
   - `db/`: the SQL, one file per area.
   - `middleware.ts`: request checks, JSON parsing, and error responses.
   - `config.ts`: environment, database pool, and judge setup.
@@ -28,8 +26,7 @@ Problems, grading cases, and progress live in Neon.
 
 Names: a *problem* is one coding question; the *catalog* is every deck and problem;
 *progress* is saved drafts, stars, and solved problems (only an accepted submission marks one
-solved); *activity* is accepted-submission history for streaks; a *run* checks the first
-example; a *submission* is graded on every case and saved.
+solved); a *run* checks the first example; a *submission* is graded on every case and saved.
 
 ## Run locally
 
